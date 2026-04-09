@@ -24,11 +24,11 @@ interface ProfileRow {
 
 interface AttendanceRow {
   id: string;
-  student_id: string;
+  student_ref: string | null;
   department_id: string;
   date: string;
   status: string;
-  profiles: { name: string } | null;
+  students: { name: string } | null;
   departments: { name: string } | null;
 }
 
@@ -41,6 +41,7 @@ const SuperAdminDashboard = () => {
   const [selectedDept, setSelectedDept] = useState('');
   const [selectedRole, setSelectedRole] = useState('');
   const [activeTab, setActiveTab] = useState<'departments' | 'users' | 'attendance'>('departments');
+  const [filterDept, setFilterDept] = useState<string>('all');
 
   const fetchDepartments = async () => {
     const { data } = await supabase.from('departments').select('*').order('name');
@@ -53,19 +54,28 @@ const SuperAdminDashboard = () => {
   };
 
   const fetchAttendance = async () => {
-    const { data } = await supabase
+    let query = supabase
       .from('attendance')
-      .select('*, profiles:student_id(name), departments(name)')
+      .select('id, student_ref, department_id, date, status, students:student_ref(name), departments(name)')
       .order('date', { ascending: false })
-      .limit(100);
+      .limit(200);
+
+    if (filterDept && filterDept !== 'all') {
+      query = query.eq('department_id', filterDept);
+    }
+
+    const { data } = await query;
     if (data) setAttendance(data as unknown as AttendanceRow[]);
   };
 
   useEffect(() => {
     fetchDepartments();
     fetchUsers();
-    fetchAttendance();
   }, []);
+
+  useEffect(() => {
+    fetchAttendance();
+  }, [filterDept]);
 
   const createDepartment = async () => {
     if (!newDeptName.trim()) return;
@@ -81,10 +91,9 @@ const SuperAdminDashboard = () => {
 
   const assignRole = async () => {
     if (!selectedUser || !selectedRole) return;
-    // Delete existing role and insert new one
     const { error: delError } = await supabase.from('user_roles').delete().eq('user_id', selectedUser);
     if (delError) { toast.error(delError.message); return; }
-    
+
     const { error } = await supabase.from('user_roles').insert({
       user_id: selectedUser,
       role: selectedRole as any,
@@ -108,6 +117,11 @@ const SuperAdminDashboard = () => {
       toast.success('Department assigned');
       fetchUsers();
     }
+  };
+
+  const statusStyles: Record<string, string> = {
+    present: 'bg-success text-success-foreground',
+    absent: 'bg-destructive text-destructive-foreground',
   };
 
   const tabs = [
@@ -143,20 +157,11 @@ const SuperAdminDashboard = () => {
 
         {activeTab === 'departments' && (
           <Card>
-            <CardHeader>
-              <CardTitle className="text-lg">Departments</CardTitle>
-            </CardHeader>
+            <CardHeader><CardTitle className="text-lg">Departments</CardTitle></CardHeader>
             <CardContent className="space-y-4">
               <div className="flex gap-2">
-                <Input
-                  placeholder="Department name"
-                  value={newDeptName}
-                  onChange={(e) => setNewDeptName(e.target.value)}
-                  onKeyDown={(e) => e.key === 'Enter' && createDepartment()}
-                />
-                <Button onClick={createDepartment}>
-                  <Plus className="w-4 h-4 mr-1" /> Add
-                </Button>
+                <Input placeholder="Department name" value={newDeptName} onChange={(e) => setNewDeptName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && createDepartment()} />
+                <Button onClick={createDepartment}><Plus className="w-4 h-4 mr-1" /> Add</Button>
               </div>
               <div className="space-y-2">
                 {departments.map(dept => (
@@ -165,9 +170,7 @@ const SuperAdminDashboard = () => {
                     <span className="font-medium">{dept.name}</span>
                   </div>
                 ))}
-                {departments.length === 0 && (
-                  <p className="text-muted-foreground text-sm text-center py-4">No departments yet</p>
-                )}
+                {departments.length === 0 && <p className="text-muted-foreground text-sm text-center py-4">No departments yet</p>}
               </div>
             </CardContent>
           </Card>
@@ -175,17 +178,13 @@ const SuperAdminDashboard = () => {
 
         {activeTab === 'users' && (
           <Card>
-            <CardHeader>
-              <CardTitle className="text-lg">Assign Roles & Departments</CardTitle>
-            </CardHeader>
+            <CardHeader><CardTitle className="text-lg">Assign Roles & Departments</CardTitle></CardHeader>
             <CardContent className="space-y-4">
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
                 <Select value={selectedUser} onValueChange={setSelectedUser}>
                   <SelectTrigger><SelectValue placeholder="Select user" /></SelectTrigger>
                   <SelectContent>
-                    {users.map(u => (
-                      <SelectItem key={u.user_id} value={u.user_id}>{u.name} ({u.email})</SelectItem>
-                    ))}
+                    {users.map(u => <SelectItem key={u.user_id} value={u.user_id}>{u.name} ({u.email})</SelectItem>)}
                   </SelectContent>
                 </Select>
                 <Select value={selectedRole} onValueChange={setSelectedRole}>
@@ -202,17 +201,13 @@ const SuperAdminDashboard = () => {
                 <Select value={selectedUser} onValueChange={setSelectedUser}>
                   <SelectTrigger><SelectValue placeholder="Select user" /></SelectTrigger>
                   <SelectContent>
-                    {users.map(u => (
-                      <SelectItem key={u.user_id} value={u.user_id}>{u.name} ({u.email})</SelectItem>
-                    ))}
+                    {users.map(u => <SelectItem key={u.user_id} value={u.user_id}>{u.name} ({u.email})</SelectItem>)}
                   </SelectContent>
                 </Select>
                 <Select value={selectedDept} onValueChange={setSelectedDept}>
                   <SelectTrigger><SelectValue placeholder="Select department" /></SelectTrigger>
                   <SelectContent>
-                    {departments.map(d => (
-                      <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>
-                    ))}
+                    {departments.map(d => <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>)}
                   </SelectContent>
                 </Select>
                 <Button onClick={assignDepartment} disabled={!selectedUser || !selectedDept}>Assign Department</Button>
@@ -224,7 +219,16 @@ const SuperAdminDashboard = () => {
         {activeTab === 'attendance' && (
           <Card>
             <CardHeader>
-              <CardTitle className="text-lg">All Attendance Records</CardTitle>
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                <CardTitle className="text-lg">Attendance Records</CardTitle>
+                <Select value={filterDept} onValueChange={setFilterDept}>
+                  <SelectTrigger className="w-[200px]"><SelectValue placeholder="Filter by department" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Departments</SelectItem>
+                    {departments.map(d => <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
             </CardHeader>
             <CardContent>
               <div className="overflow-x-auto">
@@ -240,19 +244,19 @@ const SuperAdminDashboard = () => {
                   <TableBody>
                     {attendance.map(a => (
                       <TableRow key={a.id}>
-                        <TableCell>{a.profiles?.name ?? 'Unknown'}</TableCell>
+                        <TableCell>{a.students?.name ?? 'Unknown'}</TableCell>
                         <TableCell>{a.departments?.name ?? 'Unknown'}</TableCell>
                         <TableCell>{a.date}</TableCell>
                         <TableCell>
-                          <StatusBadge status={a.status} />
+                          <span className={`text-xs px-2 py-0.5 rounded-full font-medium capitalize ${statusStyles[a.status] || 'bg-muted text-muted-foreground'}`}>
+                            {a.status}
+                          </span>
                         </TableCell>
                       </TableRow>
                     ))}
                     {attendance.length === 0 && (
                       <TableRow>
-                        <TableCell colSpan={4} className="text-center text-muted-foreground">
-                          No attendance records yet
-                        </TableCell>
+                        <TableCell colSpan={4} className="text-center text-muted-foreground">No attendance records yet</TableCell>
                       </TableRow>
                     )}
                   </TableBody>
@@ -263,19 +267,6 @@ const SuperAdminDashboard = () => {
         )}
       </div>
     </DashboardLayout>
-  );
-};
-
-const StatusBadge = ({ status }: { status: string }) => {
-  const styles: Record<string, string> = {
-    present: 'bg-success text-success-foreground',
-    absent: 'bg-destructive text-destructive-foreground',
-    late: 'bg-warning text-warning-foreground',
-  };
-  return (
-    <span className={`text-xs px-2 py-0.5 rounded-full font-medium capitalize ${styles[status] || 'bg-muted text-muted-foreground'}`}>
-      {status}
-    </span>
   );
 };
 

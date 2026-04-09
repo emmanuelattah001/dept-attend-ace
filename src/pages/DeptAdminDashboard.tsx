@@ -12,19 +12,19 @@ import { CalendarCheck, Save, History, Users, Plus, Upload } from 'lucide-react'
 import DashboardLayout from '@/components/DashboardLayout';
 
 interface Student {
-  user_id: string;
+  id: string;
   name: string;
-  email: string;
   gender: string | null;
   matric_no: string | null;
+  department_id: string;
 }
 
 interface AttendanceRecord {
   id: string;
-  student_id: string;
+  student_ref: string;
   date: string;
   status: string;
-  profiles: { name: string } | null;
+  students: { name: string } | null;
 }
 
 const DeptAdminDashboard = () => {
@@ -38,12 +38,10 @@ const DeptAdminDashboard = () => {
   const [studentEdits, setStudentEdits] = useState<Record<string, Partial<Student>>>({});
   const [savingStudents, setSavingStudents] = useState(false);
 
-  // Add student form
   const [showAddDialog, setShowAddDialog] = useState(false);
-  const [newStudent, setNewStudent] = useState({ name: '', email: '', gender: '', matric_no: '' });
+  const [newStudent, setNewStudent] = useState({ name: '', gender: '', matric_no: '' });
   const [addingStudent, setAddingStudent] = useState(false);
 
-  // CSV import
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [importing, setImporting] = useState(false);
 
@@ -54,29 +52,18 @@ const DeptAdminDashboard = () => {
   }, [profile?.department_id]);
 
   const fetchStudents = async () => {
-    const { data: profiles } = await supabase
-      .from('profiles')
-      .select('user_id, name, email, gender, matric_no')
-      .eq('department_id', profile!.department_id!);
-
-    if (!profiles) return;
-
-    const { data: roles } = await supabase
-      .from('user_roles')
-      .select('user_id, role')
-      .in('user_id', profiles.map(p => p.user_id));
-
-    const studentIds = new Set(
-      (roles ?? []).filter(r => r.role === 'student').map(r => r.user_id)
-    );
-
-    setStudents(profiles.filter(p => studentIds.has(p.user_id)) as Student[]);
+    const { data } = await supabase
+      .from('students')
+      .select('id, name, gender, matric_no, department_id')
+      .eq('department_id', profile!.department_id!)
+      .order('name');
+    if (data) setStudents(data);
   };
 
   const fetchHistory = async () => {
     const { data } = await supabase
       .from('attendance')
-      .select('*, profiles:student_id(name)')
+      .select('id, student_ref, date, status, students:student_ref(name)')
       .eq('department_id', profile!.department_id!)
       .order('date', { ascending: false })
       .limit(200);
@@ -94,11 +81,12 @@ const DeptAdminDashboard = () => {
     if (!profile?.department_id || !profile?.user_id) return;
     setSaving(true);
     const entries = students.map(s => ({
-      student_id: s.user_id,
+      student_id: profile.user_id,
+      student_ref: s.id,
       department_id: profile.department_id!,
       marked_by: profile.user_id,
       date,
-      status: (attendanceMap[s.user_id] || 'present') as 'present' | 'absent',
+      status: (attendanceMap[s.id] || 'present') as 'present' | 'absent',
     }));
 
     const { error } = await supabase.from('attendance').upsert(entries, {
@@ -114,10 +102,10 @@ const DeptAdminDashboard = () => {
     setSaving(false);
   };
 
-  const updateStudentField = (userId: string, field: string, value: string) => {
+  const updateStudentField = (id: string, field: string, value: string) => {
     setStudentEdits(prev => ({
       ...prev,
-      [userId]: { ...prev[userId], [field]: value },
+      [id]: { ...prev[id], [field]: value },
     }));
   };
 
@@ -131,11 +119,11 @@ const DeptAdminDashboard = () => {
     }
 
     let hasError = false;
-    for (const [userId, edits] of editEntries) {
+    for (const [id, edits] of editEntries) {
       const { error } = await supabase
-        .from('profiles')
+        .from('students')
         .update(edits as any)
-        .eq('user_id', userId);
+        .eq('id', id);
       if (error) {
         toast.error(`Failed to update student: ${error.message}`);
         hasError = true;
@@ -152,39 +140,34 @@ const DeptAdminDashboard = () => {
   };
 
   const addStudent = async () => {
-    if (!newStudent.name.trim() || !newStudent.email.trim()) {
-      toast.error('Name and email are required');
+    if (!newStudent.name.trim()) {
+      toast.error('Name is required');
       return;
     }
+    if (!profile?.department_id) return;
     setAddingStudent(true);
 
-    const { data, error } = await supabase.functions.invoke('create-student', {
-      body: {
-        students: [{
-          name: newStudent.name.trim(),
-          email: newStudent.email.trim(),
-          gender: newStudent.gender || undefined,
-          matric_no: newStudent.matric_no.trim() || undefined,
-        }],
-      },
+    const { error } = await supabase.from('students').insert({
+      name: newStudent.name.trim(),
+      gender: newStudent.gender || null,
+      matric_no: newStudent.matric_no.trim() || null,
+      department_id: profile.department_id,
     });
 
     if (error) {
-      toast.error(error.message || 'Failed to add student');
-    } else if (data?.success) {
-      toast.success(`Student added (${data.created}/${data.total})`);
-      setNewStudent({ name: '', email: '', gender: '', matric_no: '' });
+      toast.error(error.message);
+    } else {
+      toast.success('Student added');
+      setNewStudent({ name: '', gender: '', matric_no: '' });
       setShowAddDialog(false);
       fetchStudents();
-    } else {
-      toast.error(data?.error || 'Failed to add student');
     }
     setAddingStudent(false);
   };
 
   const handleCSVImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (!file) return;
+    if (!file || !profile?.department_id) return;
 
     setImporting(true);
     try {
@@ -198,49 +181,42 @@ const DeptAdminDashboard = () => {
 
       const headers = lines[0].toLowerCase().split(',').map(h => h.trim());
       const nameIdx = headers.findIndex(h => h === 'name');
-      const emailIdx = headers.findIndex(h => h === 'email');
       const genderIdx = headers.findIndex(h => h === 'gender');
       const matricIdx = headers.findIndex(h => h.includes('matric'));
 
-      if (nameIdx === -1 || emailIdx === -1) {
-        toast.error('CSV must have "name" and "email" columns');
+      if (nameIdx === -1) {
+        toast.error('CSV must have a "name" column');
         setImporting(false);
         return;
       }
 
-      const students = lines.slice(1).map(line => {
+      const rows = lines.slice(1).map(line => {
         const cols = line.split(',').map(c => c.trim());
         return {
           name: cols[nameIdx] || '',
-          email: cols[emailIdx] || '',
-          gender: genderIdx >= 0 ? cols[genderIdx] : undefined,
-          matric_no: matricIdx >= 0 ? cols[matricIdx] : undefined,
+          gender: genderIdx >= 0 ? cols[genderIdx] || null : null,
+          matric_no: matricIdx >= 0 ? cols[matricIdx] || null : null,
+          department_id: profile.department_id!,
         };
-      }).filter(s => s.name && s.email);
+      }).filter(s => s.name);
 
-      if (students.length === 0) {
+      if (rows.length === 0) {
         toast.error('No valid students found in CSV');
         setImporting(false);
         return;
       }
 
-      const { data, error } = await supabase.functions.invoke('create-student', {
-        body: { students },
-      });
-
+      const { error } = await supabase.from('students').insert(rows);
       if (error) {
-        toast.error(error.message || 'Import failed');
-      } else if (data?.success) {
-        toast.success(`Imported ${data.created} of ${data.total} students`);
-        fetchStudents();
+        toast.error(error.message);
       } else {
-        toast.error(data?.error || 'Import failed');
+        toast.success(`Imported ${rows.length} students`);
+        fetchStudents();
       }
-    } catch (err: any) {
+    } catch {
       toast.error('Failed to parse CSV file');
     }
 
-    // Reset file input
     if (fileInputRef.current) fileInputRef.current.value = '';
     setImporting(false);
   };
@@ -292,7 +268,6 @@ const DeptAdminDashboard = () => {
           ))}
         </div>
 
-        {/* Mark Attendance Tab */}
         {activeTab === 'mark' && (
           <Card>
             <CardHeader>
@@ -308,19 +283,19 @@ const DeptAdminDashboard = () => {
             </CardHeader>
             <CardContent>
               {students.length === 0 ? (
-                <p className="text-muted-foreground text-center py-8">No students in your department yet. Go to the Students tab to add some.</p>
+                <p className="text-muted-foreground text-center py-8">No students yet. Go to the Students tab to add some.</p>
               ) : (
                 <div className="space-y-2">
                   {students.map(student => {
-                    const status = attendanceMap[student.user_id] || 'present';
+                    const status = attendanceMap[student.id] || 'present';
                     return (
-                      <div key={student.user_id} className="flex items-center justify-between p-3 rounded-lg bg-muted">
+                      <div key={student.id} className="flex items-center justify-between p-3 rounded-lg bg-muted">
                         <div>
                           <p className="font-medium">{student.name}</p>
-                          <p className="text-xs text-muted-foreground">{student.matric_no || student.email}</p>
+                          <p className="text-xs text-muted-foreground">{student.matric_no || ''}</p>
                         </div>
                         <button
-                          onClick={() => toggleStatus(student.user_id)}
+                          onClick={() => toggleStatus(student.id)}
                           className={`px-4 py-1.5 rounded-full text-xs font-semibold capitalize transition-colors ${statusStyles[status]}`}
                         >
                           {status}
@@ -334,67 +309,31 @@ const DeptAdminDashboard = () => {
           </Card>
         )}
 
-        {/* Students Tab */}
         {activeTab === 'students' && (
           <Card>
             <CardHeader>
               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                 <CardTitle className="text-lg">Student Details</CardTitle>
                 <div className="flex items-center gap-2">
-                  {/* CSV Import */}
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    accept=".csv"
-                    onChange={handleCSVImport}
-                    className="hidden"
-                  />
-                  <Button
-                    variant="outline"
-                    onClick={() => fileInputRef.current?.click()}
-                    disabled={importing}
-                  >
+                  <input ref={fileInputRef} type="file" accept=".csv" onChange={handleCSVImport} className="hidden" />
+                  <Button variant="outline" onClick={() => fileInputRef.current?.click()} disabled={importing}>
                     <Upload className="w-4 h-4 mr-1" /> {importing ? 'Importing...' : 'Import CSV'}
                   </Button>
-
-                  {/* Add Student Dialog */}
                   <Dialog open={showAddDialog} onOpenChange={setShowAddDialog}>
                     <DialogTrigger asChild>
-                      <Button>
-                        <Plus className="w-4 h-4 mr-1" /> Add Student
-                      </Button>
+                      <Button><Plus className="w-4 h-4 mr-1" /> Add Student</Button>
                     </DialogTrigger>
                     <DialogContent>
-                      <DialogHeader>
-                        <DialogTitle>Add New Student</DialogTitle>
-                      </DialogHeader>
+                      <DialogHeader><DialogTitle>Add New Student</DialogTitle></DialogHeader>
                       <div className="space-y-4 pt-2">
                         <div>
                           <label className="text-sm font-medium">Name *</label>
-                          <Input
-                            value={newStudent.name}
-                            onChange={e => setNewStudent(p => ({ ...p, name: e.target.value }))}
-                            placeholder="Full name"
-                          />
-                        </div>
-                        <div>
-                          <label className="text-sm font-medium">Email *</label>
-                          <Input
-                            type="email"
-                            value={newStudent.email}
-                            onChange={e => setNewStudent(p => ({ ...p, email: e.target.value }))}
-                            placeholder="student@email.com"
-                          />
+                          <Input value={newStudent.name} onChange={e => setNewStudent(p => ({ ...p, name: e.target.value }))} placeholder="Full name" />
                         </div>
                         <div>
                           <label className="text-sm font-medium">Gender</label>
-                          <Select
-                            value={newStudent.gender}
-                            onValueChange={v => setNewStudent(p => ({ ...p, gender: v }))}
-                          >
-                            <SelectTrigger>
-                              <SelectValue placeholder="Select gender" />
-                            </SelectTrigger>
+                          <Select value={newStudent.gender} onValueChange={v => setNewStudent(p => ({ ...p, gender: v }))}>
+                            <SelectTrigger><SelectValue placeholder="Select gender" /></SelectTrigger>
                             <SelectContent>
                               <SelectItem value="Male">Male</SelectItem>
                               <SelectItem value="Female">Female</SelectItem>
@@ -403,11 +342,7 @@ const DeptAdminDashboard = () => {
                         </div>
                         <div>
                           <label className="text-sm font-medium">Matric No</label>
-                          <Input
-                            value={newStudent.matric_no}
-                            onChange={e => setNewStudent(p => ({ ...p, matric_no: e.target.value }))}
-                            placeholder="e.g. MAT/2024/001"
-                          />
+                          <Input value={newStudent.matric_no} onChange={e => setNewStudent(p => ({ ...p, matric_no: e.target.value }))} placeholder="e.g. MAT/2024/001" />
                         </div>
                         <Button onClick={addStudent} disabled={addingStudent} className="w-full">
                           {addingStudent ? 'Adding...' : 'Add Student'}
@@ -415,7 +350,6 @@ const DeptAdminDashboard = () => {
                       </div>
                     </DialogContent>
                   </Dialog>
-
                   {Object.keys(studentEdits).length > 0 && (
                     <Button onClick={saveStudentDetails} disabled={savingStudents}>
                       <Save className="w-4 h-4 mr-1" /> Save Changes
@@ -423,9 +357,7 @@ const DeptAdminDashboard = () => {
                   )}
                 </div>
               </div>
-              <p className="text-xs text-muted-foreground mt-1">
-                CSV format: name, email, gender, matric_no (header row required)
-              </p>
+              <p className="text-xs text-muted-foreground mt-1">CSV format: name, gender, matric_no (header row required)</p>
             </CardHeader>
             <CardContent>
               {students.length === 0 ? (
@@ -436,32 +368,21 @@ const DeptAdminDashboard = () => {
                     <TableHeader>
                       <TableRow>
                         <TableHead>Name</TableHead>
-                        <TableHead>Email</TableHead>
                         <TableHead>Gender</TableHead>
                         <TableHead>Matric No</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
                       {students.map(student => {
-                        const edits = studentEdits[student.user_id] || {};
+                        const edits = studentEdits[student.id] || {};
                         return (
-                          <TableRow key={student.user_id}>
+                          <TableRow key={student.id}>
                             <TableCell>
-                              <Input
-                                value={edits.name ?? student.name}
-                                onChange={(e) => updateStudentField(student.user_id, 'name', e.target.value)}
-                                className="min-w-[140px]"
-                              />
+                              <Input value={edits.name ?? student.name} onChange={(e) => updateStudentField(student.id, 'name', e.target.value)} className="min-w-[140px]" />
                             </TableCell>
-                            <TableCell className="text-muted-foreground text-sm">{student.email}</TableCell>
                             <TableCell>
-                              <Select
-                                value={edits.gender ?? student.gender ?? ''}
-                                onValueChange={(v) => updateStudentField(student.user_id, 'gender', v)}
-                              >
-                                <SelectTrigger className="w-[120px]">
-                                  <SelectValue placeholder="Select" />
-                                </SelectTrigger>
+                              <Select value={edits.gender ?? student.gender ?? ''} onValueChange={(v) => updateStudentField(student.id, 'gender', v)}>
+                                <SelectTrigger className="w-[120px]"><SelectValue placeholder="Select" /></SelectTrigger>
                                 <SelectContent>
                                   <SelectItem value="Male">Male</SelectItem>
                                   <SelectItem value="Female">Female</SelectItem>
@@ -469,12 +390,7 @@ const DeptAdminDashboard = () => {
                               </Select>
                             </TableCell>
                             <TableCell>
-                              <Input
-                                value={edits.matric_no ?? student.matric_no ?? ''}
-                                onChange={(e) => updateStudentField(student.user_id, 'matric_no', e.target.value)}
-                                placeholder="e.g. MAT/2024/001"
-                                className="min-w-[160px]"
-                              />
+                              <Input value={edits.matric_no ?? student.matric_no ?? ''} onChange={(e) => updateStudentField(student.id, 'matric_no', e.target.value)} placeholder="e.g. MAT/2024/001" className="min-w-[160px]" />
                             </TableCell>
                           </TableRow>
                         );
@@ -487,12 +403,9 @@ const DeptAdminDashboard = () => {
           </Card>
         )}
 
-        {/* History Tab */}
         {activeTab === 'history' && (
           <Card>
-            <CardHeader>
-              <CardTitle className="text-lg">Attendance History</CardTitle>
-            </CardHeader>
+            <CardHeader><CardTitle className="text-lg">Attendance History</CardTitle></CardHeader>
             <CardContent>
               <div className="overflow-x-auto">
                 <Table>
@@ -506,7 +419,7 @@ const DeptAdminDashboard = () => {
                   <TableBody>
                     {history.map(r => (
                       <TableRow key={r.id}>
-                        <TableCell>{r.profiles?.name ?? 'Unknown'}</TableCell>
+                        <TableCell>{r.students?.name ?? 'Unknown'}</TableCell>
                         <TableCell>{r.date}</TableCell>
                         <TableCell>
                           <span className={`text-xs px-2 py-0.5 rounded-full font-medium capitalize ${statusStyles[r.status] || 'bg-muted'}`}>
