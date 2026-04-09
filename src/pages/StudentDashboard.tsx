@@ -3,7 +3,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { CalendarCheck, CheckCircle, XCircle, Clock } from 'lucide-react';
+import { CalendarCheck, CheckCircle, XCircle } from 'lucide-react';
 import DashboardLayout from '@/components/DashboardLayout';
 
 interface AttendanceRecord {
@@ -16,7 +16,7 @@ interface AttendanceRecord {
 const StudentDashboard = () => {
   const { user } = useAuth();
   const [records, setRecords] = useState<AttendanceRecord[]>([]);
-  const [stats, setStats] = useState({ present: 0, absent: 0, late: 0 });
+  const [stats, setStats] = useState({ present: 0, absent: 0 });
 
   useEffect(() => {
     if (!user) return;
@@ -32,20 +32,18 @@ const StudentDashboard = () => {
         setStats({
           present: typed.filter(r => r.status === 'present').length,
           absent: typed.filter(r => r.status === 'absent').length,
-          late: typed.filter(r => r.status === 'late').length,
         });
       }
     };
     fetchAttendance();
   }, [user]);
 
-  const total = stats.present + stats.absent + stats.late;
+  const total = stats.present + stats.absent;
   const percentage = total > 0 ? Math.round((stats.present / total) * 100) : 0;
 
   const statusStyles: Record<string, string> = {
     present: 'bg-success text-success-foreground',
     absent: 'bg-destructive text-destructive-foreground',
-    late: 'bg-warning text-warning-foreground',
   };
 
   return (
@@ -56,7 +54,7 @@ const StudentDashboard = () => {
           <p className="text-muted-foreground text-sm mt-1">View your attendance records</p>
         </div>
 
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
           <Card>
             <CardContent className="pt-6 text-center">
               <CalendarCheck className="w-8 h-8 mx-auto text-primary mb-2" />
@@ -76,13 +74,6 @@ const StudentDashboard = () => {
               <XCircle className="w-8 h-8 mx-auto text-destructive mb-2" />
               <p className="text-2xl font-bold">{stats.absent}</p>
               <p className="text-xs text-muted-foreground">Absent</p>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="pt-6 text-center">
-              <Clock className="w-8 h-8 mx-auto text-warning mb-2" />
-              <p className="text-2xl font-bold">{stats.late}</p>
-              <p className="text-xs text-muted-foreground">Late</p>
             </CardContent>
           </Card>
         </div>

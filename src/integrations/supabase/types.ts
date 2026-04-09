@@ -89,7 +89,9 @@ export type Database = {
           created_at: string
           department_id: string | null
           email: string
+          gender: string | null
           id: string
+          matric_no: string | null
           name: string
           updated_at: string
           user_id: string
@@ -98,7 +100,9 @@ export type Database = {
           created_at?: string
           department_id?: string | null
           email: string
+          gender?: string | null
           id?: string
+          matric_no?: string | null
           name: string
           updated_at?: string
           user_id: string
@@ -107,7 +111,9 @@ export type Database = {
           created_at?: string
           department_id?: string | null
           email?: string
+          gender?: string | null
           id?: string
+          matric_no?: string | null
           name?: string
           updated_at?: string
           user_id?: string
