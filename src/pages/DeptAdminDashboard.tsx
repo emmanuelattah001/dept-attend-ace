@@ -52,22 +52,22 @@ const DeptAdminDashboard = () => {
   }, [profile?.department_id]);
 
   const fetchStudents = async () => {
-    const { data } = await supabase
+    const { data } = await (supabase as any)
       .from('students')
       .select('id, name, gender, matric_no, department_id')
       .eq('department_id', profile!.department_id!)
       .order('name');
-    if (data) setStudents(data);
+    if (data) setStudents(data as Student[]);
   };
 
   const fetchHistory = async () => {
-    const { data } = await supabase
+    const { data } = await (supabase as any)
       .from('attendance')
       .select('id, student_ref, date, status, students:student_ref(name)')
       .eq('department_id', profile!.department_id!)
       .order('date', { ascending: false })
       .limit(200);
-    if (data) setHistory(data as unknown as AttendanceRecord[]);
+    if (data) setHistory(data as AttendanceRecord[]);
   };
 
   const toggleStatus = (studentId: string) => {
@@ -89,7 +89,7 @@ const DeptAdminDashboard = () => {
       status: (attendanceMap[s.id] || 'present') as 'present' | 'absent',
     }));
 
-    const { error } = await supabase.from('attendance').upsert(entries, {
+    const { error } = await (supabase as any).from('attendance').upsert(entries, {
       onConflict: 'student_id,date',
     });
 
@@ -120,9 +120,9 @@ const DeptAdminDashboard = () => {
 
     let hasError = false;
     for (const [id, edits] of editEntries) {
-      const { error } = await supabase
+      const { error } = await (supabase as any)
         .from('students')
-        .update(edits as any)
+        .update(edits)
         .eq('id', id);
       if (error) {
         toast.error(`Failed to update student: ${error.message}`);
@@ -147,7 +147,7 @@ const DeptAdminDashboard = () => {
     if (!profile?.department_id) return;
     setAddingStudent(true);
 
-    const { error } = await supabase.from('students').insert({
+    const { error } = await (supabase as any).from('students').insert({
       name: newStudent.name.trim(),
       gender: newStudent.gender || null,
       matric_no: newStudent.matric_no.trim() || null,
@@ -206,7 +206,7 @@ const DeptAdminDashboard = () => {
         return;
       }
 
-      const { error } = await supabase.from('students').insert(rows);
+      const { error } = await (supabase as any).from('students').insert(rows);
       if (error) {
         toast.error(error.message);
       } else {
