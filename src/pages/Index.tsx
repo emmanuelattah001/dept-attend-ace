@@ -1,16 +1,31 @@
-// Update this page (the content is just a fallback if you fail to update the page)
+import { useAuth } from '@/hooks/useAuth';
+import AuthPage from './AuthPage';
+import SuperAdminDashboard from './SuperAdminDashboard';
+import DeptAdminDashboard from './DeptAdminDashboard';
+import StudentDashboard from './StudentDashboard';
 
-// IMPORTANT: Fully REPLACE this with your own code
-const PlaceholderIndex = () => {
-  // PLACEHOLDER: Replace this entire return statement with the user's app.
-  // The inline background color is intentionally not part of the design system.
-  return (
-    <div className="flex min-h-screen items-center justify-center" style={{ backgroundColor: '#fcfbf8' }}>
-      <img data-lovable-blank-page-placeholder="REMOVE_THIS" src="/placeholder.svg" alt="Your app will live here!" />
-    </div>
-  );
+const Index = () => {
+  const { session, role, loading } = useAuth();
+
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background">
+        <div className="animate-pulse text-muted-foreground">Loading...</div>
+      </div>
+    );
+  }
+
+  if (!session) return <AuthPage />;
+
+  switch (role) {
+    case 'super_admin':
+      return <SuperAdminDashboard />;
+    case 'dept_admin':
+      return <DeptAdminDashboard />;
+    case 'student':
+    default:
+      return <StudentDashboard />;
+  }
 };
-
-const Index = PlaceholderIndex;
 
 export default Index;
