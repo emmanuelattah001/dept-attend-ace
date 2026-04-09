@@ -23,6 +23,7 @@ export type Database = {
           marked_by: string
           status: Database["public"]["Enums"]["attendance_status"]
           student_id: string
+          student_ref: string | null
         }
         Insert: {
           created_at?: string
@@ -32,6 +33,7 @@ export type Database = {
           marked_by: string
           status?: Database["public"]["Enums"]["attendance_status"]
           student_id: string
+          student_ref?: string | null
         }
         Update: {
           created_at?: string
@@ -41,6 +43,7 @@ export type Database = {
           marked_by?: string
           status?: Database["public"]["Enums"]["attendance_status"]
           student_id?: string
+          student_ref?: string | null
         }
         Relationships: [
           {
@@ -63,6 +66,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "profiles"
             referencedColumns: ["user_id"]
+          },
+          {
+            foreignKeyName: "attendance_student_ref_fkey"
+            columns: ["student_ref"]
+            isOneToOne: false
+            referencedRelation: "students"
+            referencedColumns: ["id"]
           },
         ]
       }
@@ -121,6 +131,41 @@ export type Database = {
         Relationships: [
           {
             foreignKeyName: "profiles_department_id_fkey"
+            columns: ["department_id"]
+            isOneToOne: false
+            referencedRelation: "departments"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      students: {
+        Row: {
+          created_at: string | null
+          department_id: string
+          gender: string | null
+          id: string
+          matric_no: string | null
+          name: string
+        }
+        Insert: {
+          created_at?: string | null
+          department_id: string
+          gender?: string | null
+          id?: string
+          matric_no?: string | null
+          name: string
+        }
+        Update: {
+          created_at?: string | null
+          department_id?: string
+          gender?: string | null
+          id?: string
+          matric_no?: string | null
+          name?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "students_department_id_fkey"
             columns: ["department_id"]
             isOneToOne: false
             referencedRelation: "departments"
