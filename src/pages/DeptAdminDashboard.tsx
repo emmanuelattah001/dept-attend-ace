@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
 import { Button } from '@/components/ui/button';
@@ -6,8 +6,9 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { toast } from 'sonner';
-import { CalendarCheck, Save, History, Users } from 'lucide-react';
+import { CalendarCheck, Save, History, Users, Plus, Upload } from 'lucide-react';
 import DashboardLayout from '@/components/DashboardLayout';
 
 interface Student {
@@ -36,6 +37,15 @@ const DeptAdminDashboard = () => {
   const [saving, setSaving] = useState(false);
   const [studentEdits, setStudentEdits] = useState<Record<string, Partial<Student>>>({});
   const [savingStudents, setSavingStudents] = useState(false);
+
+  // Add student form
+  const [showAddDialog, setShowAddDialog] = useState(false);
+  const [newStudent, setNewStudent] = useState({ name: '', email: '', gender: '', matric_no: '' });
+  const [addingStudent, setAddingStudent] = useState(false);
+
+  // CSV import
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [importing, setImporting] = useState(false);
 
   useEffect(() => {
     if (!profile?.department_id) return;
@@ -141,6 +151,100 @@ const DeptAdminDashboard = () => {
     setSavingStudents(false);
   };
 
+  const addStudent = async () => {
+    if (!newStudent.name.trim() || !newStudent.email.trim()) {
+      toast.error('Name and email are required');
+      return;
+    }
+    setAddingStudent(true);
+
+    const { data, error } = await supabase.functions.invoke('create-student', {
+      body: {
+        students: [{
+          name: newStudent.name.trim(),
+          email: newStudent.email.trim(),
+          gender: newStudent.gender || undefined,
+          matric_no: newStudent.matric_no.trim() || undefined,
+        }],
+      },
+    });
+
+    if (error) {
+      toast.error(error.message || 'Failed to add student');
+    } else if (data?.success) {
+      toast.success(`Student added (${data.created}/${data.total})`);
+      setNewStudent({ name: '', email: '', gender: '', matric_no: '' });
+      setShowAddDialog(false);
+      fetchStudents();
+    } else {
+      toast.error(data?.error || 'Failed to add student');
+    }
+    setAddingStudent(false);
+  };
+
+  const handleCSVImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setImporting(true);
+    try {
+      const text = await file.text();
+      const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
+      if (lines.length < 2) {
+        toast.error('CSV must have a header row and at least one data row');
+        setImporting(false);
+        return;
+      }
+
+      const headers = lines[0].toLowerCase().split(',').map(h => h.trim());
+      const nameIdx = headers.findIndex(h => h === 'name');
+      const emailIdx = headers.findIndex(h => h === 'email');
+      const genderIdx = headers.findIndex(h => h === 'gender');
+      const matricIdx = headers.findIndex(h => h.includes('matric'));
+
+      if (nameIdx === -1 || emailIdx === -1) {
+        toast.error('CSV must have "name" and "email" columns');
+        setImporting(false);
+        return;
+      }
+
+      const students = lines.slice(1).map(line => {
+        const cols = line.split(',').map(c => c.trim());
+        return {
+          name: cols[nameIdx] || '',
+          email: cols[emailIdx] || '',
+          gender: genderIdx >= 0 ? cols[genderIdx] : undefined,
+          matric_no: matricIdx >= 0 ? cols[matricIdx] : undefined,
+        };
+      }).filter(s => s.name && s.email);
+
+      if (students.length === 0) {
+        toast.error('No valid students found in CSV');
+        setImporting(false);
+        return;
+      }
+
+      const { data, error } = await supabase.functions.invoke('create-student', {
+        body: { students },
+      });
+
+      if (error) {
+        toast.error(error.message || 'Import failed');
+      } else if (data?.success) {
+        toast.success(`Imported ${data.created} of ${data.total} students`);
+        fetchStudents();
+      } else {
+        toast.error(data?.error || 'Import failed');
+      }
+    } catch (err: any) {
+      toast.error('Failed to parse CSV file');
+    }
+
+    // Reset file input
+    if (fileInputRef.current) fileInputRef.current.value = '';
+    setImporting(false);
+  };
+
   if (!profile?.department_id) {
     return (
       <DashboardLayout>
@@ -188,6 +292,7 @@ const DeptAdminDashboard = () => {
           ))}
         </div>
 
+        {/* Mark Attendance Tab */}
         {activeTab === 'mark' && (
           <Card>
             <CardHeader>
@@ -203,7 +308,7 @@ const DeptAdminDashboard = () => {
             </CardHeader>
             <CardContent>
               {students.length === 0 ? (
-                <p className="text-muted-foreground text-center py-8">No students in your department yet</p>
+                <p className="text-muted-foreground text-center py-8">No students in your department yet. Go to the Students tab to add some.</p>
               ) : (
                 <div className="space-y-2">
                   {students.map(student => {
@@ -229,19 +334,102 @@ const DeptAdminDashboard = () => {
           </Card>
         )}
 
+        {/* Students Tab */}
         {activeTab === 'students' && (
           <Card>
             <CardHeader>
-              <div className="flex items-center justify-between">
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                 <CardTitle className="text-lg">Student Details</CardTitle>
-                <Button onClick={saveStudentDetails} disabled={savingStudents || Object.keys(studentEdits).length === 0}>
-                  <Save className="w-4 h-4 mr-1" /> Save Changes
-                </Button>
+                <div className="flex items-center gap-2">
+                  {/* CSV Import */}
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept=".csv"
+                    onChange={handleCSVImport}
+                    className="hidden"
+                  />
+                  <Button
+                    variant="outline"
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={importing}
+                  >
+                    <Upload className="w-4 h-4 mr-1" /> {importing ? 'Importing...' : 'Import CSV'}
+                  </Button>
+
+                  {/* Add Student Dialog */}
+                  <Dialog open={showAddDialog} onOpenChange={setShowAddDialog}>
+                    <DialogTrigger asChild>
+                      <Button>
+                        <Plus className="w-4 h-4 mr-1" /> Add Student
+                      </Button>
+                    </DialogTrigger>
+                    <DialogContent>
+                      <DialogHeader>
+                        <DialogTitle>Add New Student</DialogTitle>
+                      </DialogHeader>
+                      <div className="space-y-4 pt-2">
+                        <div>
+                          <label className="text-sm font-medium">Name *</label>
+                          <Input
+                            value={newStudent.name}
+                            onChange={e => setNewStudent(p => ({ ...p, name: e.target.value }))}
+                            placeholder="Full name"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-sm font-medium">Email *</label>
+                          <Input
+                            type="email"
+                            value={newStudent.email}
+                            onChange={e => setNewStudent(p => ({ ...p, email: e.target.value }))}
+                            placeholder="student@email.com"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-sm font-medium">Gender</label>
+                          <Select
+                            value={newStudent.gender}
+                            onValueChange={v => setNewStudent(p => ({ ...p, gender: v }))}
+                          >
+                            <SelectTrigger>
+                              <SelectValue placeholder="Select gender" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="Male">Male</SelectItem>
+                              <SelectItem value="Female">Female</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div>
+                          <label className="text-sm font-medium">Matric No</label>
+                          <Input
+                            value={newStudent.matric_no}
+                            onChange={e => setNewStudent(p => ({ ...p, matric_no: e.target.value }))}
+                            placeholder="e.g. MAT/2024/001"
+                          />
+                        </div>
+                        <Button onClick={addStudent} disabled={addingStudent} className="w-full">
+                          {addingStudent ? 'Adding...' : 'Add Student'}
+                        </Button>
+                      </div>
+                    </DialogContent>
+                  </Dialog>
+
+                  {Object.keys(studentEdits).length > 0 && (
+                    <Button onClick={saveStudentDetails} disabled={savingStudents}>
+                      <Save className="w-4 h-4 mr-1" /> Save Changes
+                    </Button>
+                  )}
+                </div>
               </div>
+              <p className="text-xs text-muted-foreground mt-1">
+                CSV format: name, email, gender, matric_no (header row required)
+              </p>
             </CardHeader>
             <CardContent>
               {students.length === 0 ? (
-                <p className="text-muted-foreground text-center py-8">No students in your department yet</p>
+                <p className="text-muted-foreground text-center py-8">No students yet. Add them manually or import a CSV.</p>
               ) : (
                 <div className="overflow-x-auto">
                   <Table>
@@ -299,6 +487,7 @@ const DeptAdminDashboard = () => {
           </Card>
         )}
 
+        {/* History Tab */}
         {activeTab === 'history' && (
           <Card>
             <CardHeader>
