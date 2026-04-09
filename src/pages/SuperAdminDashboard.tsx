@@ -54,7 +54,7 @@ const SuperAdminDashboard = () => {
   };
 
   const fetchAttendance = async () => {
-    let query = supabase
+    let query = (supabase as any)
       .from('attendance')
       .select('id, student_ref, department_id, date, status, students:student_ref(name), departments(name)')
       .order('date', { ascending: false })
