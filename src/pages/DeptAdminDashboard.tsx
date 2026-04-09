@@ -8,7 +8,7 @@ import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { toast } from 'sonner';
-import { CalendarCheck, Save, History, Users, Plus, Upload } from 'lucide-react';
+import { CalendarCheck, Download, History, Users, Plus, Upload } from 'lucide-react';
 import DashboardLayout from '@/components/DashboardLayout';
 
 interface Student {
@@ -30,11 +30,11 @@ interface AttendanceRecord {
 const DeptAdminDashboard = () => {
   const { profile } = useAuth();
   const [students, setStudents] = useState<Student[]>([]);
-  const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
-  const [attendanceMap, setAttendanceMap] = useState<Record<string, 'present' | 'absent'>>({});
+  // Multi-date attendance: dateColumns are the dates, grid maps studentId -> date -> status
+  const [dateColumns, setDateColumns] = useState<string[]>([new Date().toISOString().split('T')[0]]);
+  const [grid, setGrid] = useState<Record<string, Record<string, 'P' | 'A' | ''>>>({});
   const [history, setHistory] = useState<AttendanceRecord[]>([]);
   const [activeTab, setActiveTab] = useState<'mark' | 'history' | 'students'>('mark');
-  const [saving, setSaving] = useState(false);
   const [studentEdits, setStudentEdits] = useState<Record<string, Partial<Student>>>({});
   const [savingStudents, setSavingStudents] = useState(false);
 
@@ -70,36 +70,77 @@ const DeptAdminDashboard = () => {
     if (data) setHistory(data as AttendanceRecord[]);
   };
 
-  const toggleStatus = (studentId: string) => {
-    setAttendanceMap(prev => ({
-      ...prev,
-      [studentId]: prev[studentId] === 'absent' ? 'present' : 'absent',
-    }));
+  const addDateColumn = () => {
+    const newDate = new Date().toISOString().split('T')[0];
+    if (!dateColumns.includes(newDate)) {
+      setDateColumns(prev => [...prev, newDate]);
+    } else {
+      // Add next available date
+      let d = new Date();
+      while (dateColumns.includes(d.toISOString().split('T')[0])) {
+        d.setDate(d.getDate() + 1);
+      }
+      setDateColumns(prev => [...prev, d.toISOString().split('T')[0]]);
+    }
   };
 
-  const saveAttendance = async () => {
-    if (!profile?.department_id || !profile?.user_id) return;
-    setSaving(true);
-    const entries = students.map(s => ({
-      student_id: profile.user_id,
-      student_ref: s.id,
-      department_id: profile.department_id!,
-      marked_by: profile.user_id,
-      date,
-      status: (attendanceMap[s.id] || 'present') as 'present' | 'absent',
-    }));
+  const updateDateColumn = (index: number, value: string) => {
+    setDateColumns(prev => prev.map((d, i) => i === index ? value : d));
+  };
 
-    const { error } = await (supabase as any).from('attendance').upsert(entries, {
-      onConflict: 'student_id,date',
+  const removeDateColumn = (index: number) => {
+    if (dateColumns.length <= 1) return;
+    const dateToRemove = dateColumns[index];
+    setDateColumns(prev => prev.filter((_, i) => i !== index));
+    // Clean grid
+    setGrid(prev => {
+      const next = { ...prev };
+      for (const sid of Object.keys(next)) {
+        const { [dateToRemove]: _, ...rest } = next[sid];
+        next[sid] = rest;
+      }
+      return next;
+    });
+  };
+
+  const toggleCell = (studentId: string, date: string) => {
+    setGrid(prev => {
+      const current = prev[studentId]?.[date] || '';
+      const next = current === '' ? 'P' : current === 'P' ? 'A' : '';
+      return {
+        ...prev,
+        [studentId]: { ...prev[studentId], [date]: next },
+      };
+    });
+  };
+
+  const exportCSV = () => {
+    if (students.length === 0) {
+      toast.error('No students to export');
+      return;
+    }
+
+    const headers = ['S/N', 'Name', 'Gender', 'Matric No', ...dateColumns.map(d => d)];
+    const rows = students.map((s, i) => {
+      const cells = [
+        String(i + 1),
+        s.name,
+        s.gender || '',
+        s.matric_no || '',
+        ...dateColumns.map(d => grid[s.id]?.[d] || ''),
+      ];
+      return cells.map(c => `"${c.replace(/"/g, '""')}"`).join(',');
     });
 
-    if (error) {
-      toast.error(error.message);
-    } else {
-      toast.success('Attendance saved');
-      fetchHistory();
-    }
-    setSaving(false);
+    const csv = [headers.join(','), ...rows].join('\n');
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `attendance_${dateColumns[0]}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+    toast.success('CSV exported');
   };
 
   const updateStudentField = (id: string, field: string, value: string) => {
@@ -120,10 +161,7 @@ const DeptAdminDashboard = () => {
 
     let hasError = false;
     for (const [id, edits] of editEntries) {
-      const { error } = await (supabase as any)
-        .from('students')
-        .update(edits)
-        .eq('id', id);
+      const { error } = await (supabase as any).from('students').update(edits).eq('id', id);
       if (error) {
         toast.error(`Failed to update student: ${error.message}`);
         hasError = true;
@@ -240,6 +278,12 @@ const DeptAdminDashboard = () => {
     absent: 'bg-destructive text-destructive-foreground',
   };
 
+  const cellStyles: Record<string, string> = {
+    P: 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200',
+    A: 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200',
+    '': 'bg-muted text-muted-foreground',
+  };
+
   const tabs = [
     { id: 'mark' as const, label: 'Mark Attendance', icon: CalendarCheck },
     { id: 'students' as const, label: 'Students', icon: Users },
@@ -274,35 +318,73 @@ const DeptAdminDashboard = () => {
               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                 <CardTitle className="text-lg">Mark Attendance</CardTitle>
                 <div className="flex items-center gap-2">
-                  <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="w-auto" />
-                  <Button onClick={saveAttendance} disabled={saving || students.length === 0}>
-                    <Save className="w-4 h-4 mr-1" /> Save
+                  <Button variant="outline" size="sm" onClick={addDateColumn}>
+                    <Plus className="w-4 h-4 mr-1" /> Add Date
+                  </Button>
+                  <Button onClick={exportCSV} disabled={students.length === 0}>
+                    <Download className="w-4 h-4 mr-1" /> Export CSV
                   </Button>
                 </div>
               </div>
+              <p className="text-xs text-muted-foreground mt-1">Click a cell to toggle: empty → P (Present) → A (Absent) → empty</p>
             </CardHeader>
             <CardContent>
               {students.length === 0 ? (
                 <p className="text-muted-foreground text-center py-8">No students yet. Go to the Students tab to add some.</p>
               ) : (
-                <div className="space-y-2">
-                  {students.map(student => {
-                    const status = attendanceMap[student.id] || 'present';
-                    return (
-                      <div key={student.id} className="flex items-center justify-between p-3 rounded-lg bg-muted">
-                        <div>
-                          <p className="font-medium">{student.name}</p>
-                          <p className="text-xs text-muted-foreground">{student.matric_no || ''}</p>
-                        </div>
-                        <button
-                          onClick={() => toggleStatus(student.id)}
-                          className={`px-4 py-1.5 rounded-full text-xs font-semibold capitalize transition-colors ${statusStyles[status]}`}
-                        >
-                          {status}
-                        </button>
-                      </div>
-                    );
-                  })}
+                <div className="overflow-x-auto">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead className="w-12 text-center">S/N</TableHead>
+                        <TableHead className="min-w-[150px]">Name</TableHead>
+                        <TableHead className="w-16 text-center">Gender</TableHead>
+                        <TableHead className="min-w-[130px]">Matric No</TableHead>
+                        {dateColumns.map((date, i) => (
+                          <TableHead key={i} className="text-center min-w-[110px]">
+                            <div className="flex flex-col items-center gap-1">
+                              <Input
+                                type="date"
+                                value={date}
+                                onChange={e => updateDateColumn(i, e.target.value)}
+                                className="h-7 text-xs w-[120px] px-1"
+                              />
+                              {dateColumns.length > 1 && (
+                                <button onClick={() => removeDateColumn(i)} className="text-[10px] text-destructive hover:underline">
+                                  remove
+                                </button>
+                              )}
+                            </div>
+                          </TableHead>
+                        ))}
+                        <TableHead className="w-20 text-center">Remark</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {students.map((student, idx) => (
+                        <TableRow key={student.id}>
+                          <TableCell className="text-center font-medium">{idx + 1}</TableCell>
+                          <TableCell className="font-medium">{student.name}</TableCell>
+                          <TableCell className="text-center text-sm">{student.gender ? student.gender.charAt(0) : ''}</TableCell>
+                          <TableCell className="text-sm">{student.matric_no || ''}</TableCell>
+                          {dateColumns.map((date, i) => {
+                            const val = grid[student.id]?.[date] || '';
+                            return (
+                              <TableCell key={i} className="text-center p-1">
+                                <button
+                                  onClick={() => toggleCell(student.id, date)}
+                                  className={`w-full h-8 rounded text-xs font-bold transition-colors ${cellStyles[val]}`}
+                                >
+                                  {val || '—'}
+                                </button>
+                              </TableCell>
+                            );
+                          })}
+                          <TableCell className="text-center text-sm text-muted-foreground">—</TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
                 </div>
               )}
             </CardContent>
@@ -352,7 +434,7 @@ const DeptAdminDashboard = () => {
                   </Dialog>
                   {Object.keys(studentEdits).length > 0 && (
                     <Button onClick={saveStudentDetails} disabled={savingStudents}>
-                      <Save className="w-4 h-4 mr-1" /> Save Changes
+                      Save Changes
                     </Button>
                   )}
                 </div>
