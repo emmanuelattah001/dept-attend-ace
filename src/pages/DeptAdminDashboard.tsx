@@ -11,6 +11,7 @@ import { toast } from 'sonner';
 import { CalendarCheck, Download, History, Users, Plus, Upload, Save, Trash2, Share2 } from 'lucide-react';
 import DashboardLayout from '@/components/DashboardLayout';
 import * as XLSX from "xlsx";
+import jsPDF from 'jspdf';
 
 interface Student {
   id: string;
@@ -262,26 +263,52 @@ const DeptAdminDashboard = () => {
   toast.success('Excel exported');
 };
 
+const generatePDF = (): jsPDF => {
+  const doc = new jsPDF();
 
-const handleShare = async () => {
-  const shareData = {
-    title: 'Attendance System',
-    text: `Check attendance for ${departmentName}`,
-    url: window.location.href,
-  };
+  doc.text(`Attendance Report - ${departmentName}`, 10, 10);
 
-  if (navigator.share) {
+  let y = 20;
+
+  history.forEach((a, i) => {
+    const line = `${i + 1}. ${a.students?.name ?? 'Unknown'} | ${a.date} | ${a.status}`;
+    doc.text(line, 10, y);
+    y += 8;
+
+    if (y > 280) {
+      doc.addPage();
+      y = 20;
+    }
+  });
+
+  return doc; 
+};
+
+  const sharePDF = async () => {
+  const doc = generatePDF();
+
+  const pdfBlob = doc.output('blob');
+
+  const file = new File([pdfBlob], `attendance_${departmentName}.pdf`, {
+    type: 'application/pdf',
+  });
+
+  if (navigator.share && navigator.canShare?.({ files: [file] })) {
     try {
-      await navigator.share(shareData);
+      await navigator.share({
+        title: 'Attendance Report',
+        text: `Attendance report for ${departmentName}`,
+        files: [file],
+      });
     } catch (err) {
       console.log(err);
     }
   } else {
-    // fallback to WhatsApp
-    const url = `https://wa.me/?text=${encodeURIComponent(shareData.text + ' ' + shareData.url)}`;
-    window.open(url, '_blank');
+    // fallback: download
+    doc.save(`attendance_${departmentName}.pdf`);
   }
 };
+
 
   const updateStudentField = (id: string, field: string, value: string) => {
     setStudentEdits(prev => ({
@@ -480,10 +507,9 @@ const handleShare = async () => {
                   <Button variant="outline" onClick={exportCSV} disabled={students.length === 0}>
                     <Download className="w-4 h-4 mr-1" /> Export CSV
                   </Button>
-                  <Button variant="outline" onClick={handleShare}>
-                        <Share2 className="w-4 h-4 mr-1" />
-                        Share
-                      </Button>
+                  <Button onClick={sharePDF}>
+                    📄 Share PDF
+                  </Button>
                   <Button variant="outline" onClick={exportExcel}>
                   <Download className="w-4 h-4 mr-1" /> Excel
                   </Button>
