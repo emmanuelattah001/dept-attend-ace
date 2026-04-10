@@ -638,6 +638,42 @@ const DeptAdminDashboard = () => {
           <Card>
             <CardHeader><CardTitle className="text-lg">Attendance History</CardTitle></CardHeader>
             <CardContent>
+              <div className="mb-4 grid grid-cols-2 md:grid-cols-3 gap-3">
+                  {students.map(student => {
+                    const month = new Date().toISOString().slice(0, 7);
+
+                    const records = history.filter(
+                      r => r.student_ref === student.id && r.date.startsWith(month)
+                    );
+
+                    const total = records.length;
+                    const present = records.filter(r => r.status === 'present').length;
+                    const percent = total ? ((present / total) * 100).toFixed(1) : '0.0';
+
+                    return (
+                      <div
+                        key={student.id}
+                        className="p-3 rounded-lg border bg-muted/30"
+                      >
+                        <p className="font-medium text-sm">{student.name}</p>
+
+                        <p className="text-xs text-muted-foreground">
+                          Present: {present} / {total}
+                        </p>
+
+                        <p
+                          className={`text-sm font-bold ${
+                            Number(percent) >= 75
+                              ? 'text-green-600'
+                              : 'text-red-500'
+                          }`}
+                        >
+                          {percent}%
+                        </p>
+                      </div>
+                    );
+                  })}
+                </div>
               <div className="overflow-x-auto">
                 <Table>
                   <TableHeader>
