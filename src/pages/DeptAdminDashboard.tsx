@@ -27,7 +27,11 @@ interface AttendanceRecord {
   student_ref: string;
   date: string;
   status: string;
-  students: { name: string } | null;
+  students: {
+  name: string;
+  matric_no: string | null;
+  gender: string | null;
+} | null;
 }
 
 const DeptAdminDashboard = () => {
@@ -78,7 +82,17 @@ const DeptAdminDashboard = () => {
   const fetchHistory = async () => {
     const { data } = await (supabase as any)
       .from('attendance')
-      .select('id, student_ref, date, status, students:student_ref(name)')
+      .select(`
+          id,
+          student_ref,
+          date,
+          status,
+          students:student_ref (
+            name,
+            matric_no,
+            gender
+          )
+        `)
       .eq('department_id', profile!.department_id!)
       .order('date', { ascending: false })
       .limit(200);
@@ -277,16 +291,17 @@ const generatePDF = (): jsPDF => {
 
   // 📊 TABLE DATA
   const tableData = history.map((a, i) => [
-    i + 1,
-    a.students?.name ?? 'Unknown',
-    a.date,
-    a.status,
+  i + 1,
+  a.students?.name ?? 'Unknown',
+  a.students?.matric_no ?? '-',
+  a.students?.gender ?? '-',
+  a.date,
+  a.status,
   ]);
-
   // 📋 TABLE
   autoTable(doc, {
     startY: 40,
-    head: [['S/N', 'Student Name', 'Date', 'Status']],
+    head: [['S/N', 'Student Name', 'Matric No', 'Gender', 'Date', 'Status']],
     body: tableData,
 
     styles: {
@@ -305,7 +320,7 @@ const generatePDF = (): jsPDF => {
 
     didParseCell: function (data) {
       // 🎨 Color status column
-      if (data.column.index === 3) {
+      if (data.column.index === 5) {
         if (data.cell.raw === 'present') {
           data.cell.styles.textColor = [0, 150, 0]; // green
         }
@@ -779,6 +794,8 @@ const generatePDF = (): jsPDF => {
                   <TableHeader>
                     <TableRow>
                       <TableHead>Student</TableHead>
+                      <TableHead>Matric No</TableHead>
+                      <TableHead>Gender</TableHead>
                       <TableHead>Date</TableHead>
                       <TableHead>Status</TableHead>
                     </TableRow>
@@ -787,6 +804,8 @@ const generatePDF = (): jsPDF => {
                     {history.map(r => (
                       <TableRow key={r.id}>
                         <TableCell>{r.students?.name ?? 'Unknown'}</TableCell>
+                        <TableCell>{r.students?.matric_no ?? '-'}</TableCell>
+                        <TableCell>{r.students?.gender ?? '-'}</TableCell>
                         <TableCell>{r.date}</TableCell>
                         <TableCell>
                           <span className={`text-xs px-2 py-0.5 rounded-full font-medium capitalize ${statusStyles[r.status] || 'bg-muted'}`}>
