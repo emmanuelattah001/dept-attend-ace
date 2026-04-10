@@ -8,7 +8,7 @@ import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { toast } from 'sonner';
-import { CalendarCheck, Download, History, Users, Plus, Upload } from 'lucide-react';
+import { CalendarCheck, Download, History, Users, Plus, Upload, Save } from 'lucide-react';
 import DashboardLayout from '@/components/DashboardLayout';
 
 interface Student {
@@ -28,15 +28,16 @@ interface AttendanceRecord {
 }
 
 const DeptAdminDashboard = () => {
-  const { profile } = useAuth();
+  const { profile, user } = useAuth();
   const [students, setStudents] = useState<Student[]>([]);
-  // Multi-date attendance: dateColumns are the dates, grid maps studentId -> date -> status
+  const [departmentName, setDepartmentName] = useState<string>('');
   const [dateColumns, setDateColumns] = useState<string[]>([new Date().toISOString().split('T')[0]]);
   const [grid, setGrid] = useState<Record<string, Record<string, 'P' | 'A' | ''>>>({});
   const [history, setHistory] = useState<AttendanceRecord[]>([]);
   const [activeTab, setActiveTab] = useState<'mark' | 'history' | 'students'>('mark');
   const [studentEdits, setStudentEdits] = useState<Record<string, Partial<Student>>>({});
   const [savingStudents, setSavingStudents] = useState(false);
+  const [savingAttendance, setSavingAttendance] = useState(false);
 
   const [showAddDialog, setShowAddDialog] = useState(false);
   const [newStudent, setNewStudent] = useState({ name: '', gender: '', matric_no: '' });
@@ -49,7 +50,17 @@ const DeptAdminDashboard = () => {
     if (!profile?.department_id) return;
     fetchStudents();
     fetchHistory();
+    fetchDepartmentName();
   }, [profile?.department_id]);
+
+  const fetchDepartmentName = async () => {
+    const { data } = await supabase
+      .from('departments')
+      .select('name')
+      .eq('id', profile!.department_id!)
+      .single();
+    if (data) setDepartmentName(data.name);
+  };
 
   const fetchStudents = async () => {
     const { data } = await (supabase as any)
@@ -75,7 +86,6 @@ const DeptAdminDashboard = () => {
     if (!dateColumns.includes(newDate)) {
       setDateColumns(prev => [...prev, newDate]);
     } else {
-      // Add next available date
       let d = new Date();
       while (dateColumns.includes(d.toISOString().split('T')[0])) {
         d.setDate(d.getDate() + 1);
@@ -92,7 +102,6 @@ const DeptAdminDashboard = () => {
     if (dateColumns.length <= 1) return;
     const dateToRemove = dateColumns[index];
     setDateColumns(prev => prev.filter((_, i) => i !== index));
-    // Clean grid
     setGrid(prev => {
       const next = { ...prev };
       for (const sid of Object.keys(next)) {
@@ -114,19 +123,57 @@ const DeptAdminDashboard = () => {
     });
   };
 
+  const saveAttendance = async () => {
+    if (!profile?.department_id || !user?.id) return;
+
+    const rows: any[] = [];
+    for (const student of students) {
+      for (const date of dateColumns) {
+        const val = grid[student.id]?.[date];
+        if (val === 'P' || val === 'A') {
+          rows.push({
+            student_ref: student.id,
+            student_id: user.id, // placeholder, required by schema but we use student_ref
+            department_id: profile.department_id,
+            marked_by: user.id,
+            date,
+            status: val === 'P' ? 'present' : 'absent',
+          });
+        }
+      }
+    }
+
+    if (rows.length === 0) {
+      toast.error('No attendance marked to save');
+      return;
+    }
+
+    setSavingAttendance(true);
+    const { error } = await (supabase as any).from('attendance').insert(rows);
+    if (error) {
+      toast.error(error.message);
+    } else {
+      toast.success(`Saved ${rows.length} attendance records`);
+      setGrid({});
+      fetchHistory();
+    }
+    setSavingAttendance(false);
+  };
+
   const exportCSV = () => {
     if (students.length === 0) {
       toast.error('No students to export');
       return;
     }
 
-    const headers = ['S/N', 'Name', 'Gender', 'Matric No', ...dateColumns.map(d => d)];
+    const headers = ['S/N', 'Name', 'Gender', 'Matric No', 'Department', ...dateColumns];
     const rows = students.map((s, i) => {
       const cells = [
         String(i + 1),
         s.name,
         s.gender || '',
         s.matric_no || '',
+        departmentName,
         ...dateColumns.map(d => grid[s.id]?.[d] || ''),
       ];
       return cells.map(c => `"${c.replace(/"/g, '""')}"`).join(',');
@@ -137,7 +184,7 @@ const DeptAdminDashboard = () => {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `attendance_${dateColumns[0]}.csv`;
+    a.download = `attendance_${departmentName}_${dateColumns[0]}.csv`;
     a.click();
     URL.revokeObjectURL(url);
     toast.success('CSV exported');
@@ -228,7 +275,7 @@ const DeptAdminDashboard = () => {
         return;
       }
 
-      const rows = lines.slice(1).map(line => {
+      const csvRows = lines.slice(1).map(line => {
         const cols = line.split(',').map(c => c.trim());
         return {
           name: cols[nameIdx] || '',
@@ -238,17 +285,17 @@ const DeptAdminDashboard = () => {
         };
       }).filter(s => s.name);
 
-      if (rows.length === 0) {
+      if (csvRows.length === 0) {
         toast.error('No valid students found in CSV');
         setImporting(false);
         return;
       }
 
-      const { error } = await (supabase as any).from('students').insert(rows);
+      const { error } = await (supabase as any).from('students').insert(csvRows);
       if (error) {
         toast.error(error.message);
       } else {
-        toast.success(`Imported ${rows.length} students`);
+        toast.success(`Imported ${csvRows.length} students`);
         fetchStudents();
       }
     } catch {
@@ -295,7 +342,9 @@ const DeptAdminDashboard = () => {
       <div className="space-y-6">
         <div>
           <h2 className="text-2xl font-heading font-bold">Department Admin</h2>
-          <p className="text-muted-foreground text-sm mt-1">Manage students and attendance for your department</p>
+          <p className="text-muted-foreground text-sm mt-1">
+            Department: <span className="font-semibold text-foreground">{departmentName || 'Loading...'}</span>
+          </p>
         </div>
 
         <div className="flex gap-2 border-b">
@@ -316,13 +365,19 @@ const DeptAdminDashboard = () => {
           <Card>
             <CardHeader>
               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-                <CardTitle className="text-lg">Mark Attendance</CardTitle>
-                <div className="flex items-center gap-2">
+                <div>
+                  <CardTitle className="text-lg">Mark Attendance</CardTitle>
+                  <p className="text-sm text-muted-foreground mt-0.5">Department: {departmentName}</p>
+                </div>
+                <div className="flex items-center gap-2 flex-wrap">
                   <Button variant="outline" size="sm" onClick={addDateColumn}>
                     <Plus className="w-4 h-4 mr-1" /> Add Date
                   </Button>
-                  <Button onClick={exportCSV} disabled={students.length === 0}>
+                  <Button variant="outline" onClick={exportCSV} disabled={students.length === 0}>
                     <Download className="w-4 h-4 mr-1" /> Export CSV
+                  </Button>
+                  <Button onClick={saveAttendance} disabled={savingAttendance || students.length === 0}>
+                    <Save className="w-4 h-4 mr-1" /> {savingAttendance ? 'Saving...' : 'Save Attendance'}
                   </Button>
                 </div>
               </div>
@@ -340,6 +395,7 @@ const DeptAdminDashboard = () => {
                         <TableHead className="min-w-[150px]">Name</TableHead>
                         <TableHead className="w-16 text-center">Gender</TableHead>
                         <TableHead className="min-w-[130px]">Matric No</TableHead>
+                        <TableHead className="min-w-[120px]">Department</TableHead>
                         {dateColumns.map((date, i) => (
                           <TableHead key={i} className="text-center min-w-[110px]">
                             <div className="flex flex-col items-center gap-1">
@@ -367,6 +423,7 @@ const DeptAdminDashboard = () => {
                           <TableCell className="font-medium">{student.name}</TableCell>
                           <TableCell className="text-center text-sm">{student.gender ? student.gender.charAt(0) : ''}</TableCell>
                           <TableCell className="text-sm">{student.matric_no || ''}</TableCell>
+                          <TableCell className="text-sm">{departmentName}</TableCell>
                           {dateColumns.map((date, i) => {
                             const val = grid[student.id]?.[date] || '';
                             return (
