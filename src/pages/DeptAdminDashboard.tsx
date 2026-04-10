@@ -10,6 +10,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { toast } from 'sonner';
 import { CalendarCheck, Download, History, Users, Plus, Upload, Save, Trash2 } from 'lucide-react';
 import DashboardLayout from '@/components/DashboardLayout';
+import * as XLSX from "xlsx";
 
 interface Student {
   id: string;
@@ -188,6 +189,38 @@ const DeptAdminDashboard = () => {
     URL.revokeObjectURL(url);
     toast.success('CSV exported');
   };
+
+  const exportExcel = () => {
+  if (students.length === 0) {
+    toast.error('No students to export');
+    return;
+  }
+
+  const data = students.map((s, i) => {
+    const row = {
+      "S/N": i + 1,
+      "Name": s.name,
+      "Gender": s.gender || '',
+      "Matric No": s.matric_no || '',
+      "Department": departmentName,
+    };
+
+    dateColumns.forEach(d => {
+      row[d] = grid[s.id]?.[d] || '';
+    });
+
+    return row;
+  });
+
+  const worksheet = XLSX.utils.json_to_sheet(data);
+  const workbook = XLSX.utils.book_new();
+
+  XLSX.utils.book_append_sheet(workbook, worksheet, "Attendance");
+
+  XLSX.writeFile(workbook, `attendance_${departmentName}.xlsx`);
+
+  toast.success('Excel exported');
+};
 
   const updateStudentField = (id: string, field: string, value: string) => {
     setStudentEdits(prev => ({
@@ -385,6 +418,9 @@ const DeptAdminDashboard = () => {
                   </Button>
                   <Button variant="outline" onClick={exportCSV} disabled={students.length === 0}>
                     <Download className="w-4 h-4 mr-1" /> Export CSV
+                  </Button>
+                  <Button variant="outline" onClick={exportExcel}>
+                  <Download className="w-4 h-4 mr-1" /> Excel
                   </Button>
                   <Button onClick={saveAttendance} disabled={savingAttendance || students.length === 0}>
                     <Save className="w-4 h-4 mr-1" /> {savingAttendance ? 'Saving...' : 'Save Attendance'}
