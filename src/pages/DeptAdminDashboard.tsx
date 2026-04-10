@@ -804,7 +804,6 @@ const generatePDF = (): jsPDF => {
                   <TableBody>
                     {history.map(r => (
                       <TableRow key={r.id}>
-                         <TableCell className="text-center font-medium">{idx + 1}</TableCell>
                         <TableCell>{r.students?.name ?? 'Unknown'}</TableCell>
                         <TableCell>{r.students?.matric_no ?? '-'}</TableCell>
                         <TableCell>{r.students?.gender ?? '-'}</TableCell>
