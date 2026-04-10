@@ -22,7 +22,7 @@ export type Database = {
           id: string
           marked_by: string
           status: Database["public"]["Enums"]["attendance_status"]
-          student_id: string
+          student_id: string | null
           student_ref: string | null
         }
         Insert: {
@@ -32,7 +32,7 @@ export type Database = {
           id?: string
           marked_by: string
           status?: Database["public"]["Enums"]["attendance_status"]
-          student_id: string
+          student_id?: string | null
           student_ref?: string | null
         }
         Update: {
@@ -42,7 +42,7 @@ export type Database = {
           id?: string
           marked_by?: string
           status?: Database["public"]["Enums"]["attendance_status"]
-          student_id?: string
+          student_id?: string | null
           student_ref?: string | null
         }
         Relationships: [
