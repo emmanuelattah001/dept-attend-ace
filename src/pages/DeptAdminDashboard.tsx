@@ -8,7 +8,7 @@ import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { toast } from 'sonner';
-import { CalendarCheck, Download, History, Users, Plus, Upload, Save } from 'lucide-react';
+import { CalendarCheck, Download, History, Users, Plus, Upload, Save, Trash2 } from 'lucide-react';
 import DashboardLayout from '@/components/DashboardLayout';
 
 interface Student {
@@ -133,7 +133,6 @@ const DeptAdminDashboard = () => {
         if (val === 'P' || val === 'A') {
           rows.push({
             student_ref: student.id,
-            student_id: user.id, // placeholder, required by schema but we use student_ref
             department_id: profile.department_id,
             marked_by: user.id,
             date,
@@ -248,6 +247,17 @@ const DeptAdminDashboard = () => {
       fetchStudents();
     }
     setAddingStudent(false);
+  };
+
+  const deleteStudent = async (id: string, name: string) => {
+    if (!confirm(`Delete student "${name}"? This cannot be undone.`)) return;
+    const { error } = await (supabase as any).from('students').delete().eq('id', id);
+    if (error) {
+      toast.error(error.message);
+    } else {
+      toast.success('Student deleted');
+      fetchStudents();
+    }
   };
 
   const handleCSVImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -509,6 +519,7 @@ const DeptAdminDashboard = () => {
                         <TableHead>Name</TableHead>
                         <TableHead>Gender</TableHead>
                         <TableHead>Matric No</TableHead>
+                        <TableHead className="w-16">Action</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -530,6 +541,11 @@ const DeptAdminDashboard = () => {
                             </TableCell>
                             <TableCell>
                               <Input value={edits.matric_no ?? student.matric_no ?? ''} onChange={(e) => updateStudentField(student.id, 'matric_no', e.target.value)} placeholder="e.g. MAT/2024/001" className="min-w-[160px]" />
+                            </TableCell>
+                            <TableCell>
+                              <Button variant="ghost" size="icon" onClick={() => deleteStudent(student.id, student.name)} className="text-destructive hover:text-destructive">
+                                <Trash2 className="w-4 h-4" />
+                              </Button>
                             </TableCell>
                           </TableRow>
                         );
