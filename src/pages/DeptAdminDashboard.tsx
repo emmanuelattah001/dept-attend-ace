@@ -12,6 +12,7 @@ import { CalendarCheck, Download, History, Users, Plus, Upload, Save, Trash2, Sh
 import DashboardLayout from '@/components/DashboardLayout';
 import * as XLSX from "xlsx";
 import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
 
 interface Student {
   id: string;
@@ -266,22 +267,70 @@ const DeptAdminDashboard = () => {
 const generatePDF = (): jsPDF => {
   const doc = new jsPDF();
 
-  doc.text(`Attendance Report - ${departmentName}`, 10, 10);
+  // 🏫 HEADER
+  doc.setFontSize(16);
+  doc.text('ATTENDANCE REPORT', 105, 15, { align: 'center' });
 
-  let y = 20;
+  doc.setFontSize(12);
+  doc.text(`Department: ${departmentName}`, 14, 25);
+  doc.text(`Date Generated: ${new Date().toLocaleDateString()}`, 14, 32);
 
-  history.forEach((a, i) => {
-    const line = `${i + 1}. ${a.students?.name ?? 'Unknown'} | ${a.date} | ${a.status}`;
-    doc.text(line, 10, y);
-    y += 8;
+  // 📊 TABLE DATA
+  const tableData = history.map((a, i) => [
+    i + 1,
+    a.students?.name ?? 'Unknown',
+    a.date,
+    a.status,
+  ]);
 
-    if (y > 280) {
-      doc.addPage();
-      y = 20;
-    }
+  // 📋 TABLE
+  autoTable(doc, {
+    startY: 40,
+    head: [['S/N', 'Student Name', 'Date', 'Status']],
+    body: tableData,
+
+    styles: {
+      fontSize: 10,
+      cellPadding: 3,
+    },
+
+    headStyles: {
+      fillColor: [22, 160, 133], // green header
+      textColor: 255,
+    },
+
+    alternateRowStyles: {
+      fillColor: [240, 240, 240],
+    },
+
+    didParseCell: function (data) {
+      // 🎨 Color status column
+      if (data.column.index === 3) {
+        if (data.cell.raw === 'present') {
+          data.cell.styles.textColor = [0, 150, 0]; // green
+        }
+        if (data.cell.raw === 'absent') {
+          data.cell.styles.textColor = [200, 0, 0]; // red
+        }
+      }
+    },
   });
 
-  return doc; 
+  // 📄 FOOTER
+  const pageCount = doc.getNumberOfPages();
+
+  for (let i = 1; i <= pageCount; i++) {
+    doc.setPage(i);
+    doc.setFontSize(10);
+    doc.text(
+      `Page ${i} of ${pageCount}`,
+      105,
+      290,
+      { align: 'center' }
+    );
+  }
+
+  return doc;
 };
 
   const sharePDF = async () => {
