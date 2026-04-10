@@ -133,7 +133,6 @@ const DeptAdminDashboard = () => {
         if (val === 'P' || val === 'A') {
           rows.push({
             student_ref: student.id,
-            student_id: user.id, // placeholder, required by schema but we use student_ref
             department_id: profile.department_id,
             marked_by: user.id,
             date,
