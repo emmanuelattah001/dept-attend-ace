@@ -6,7 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { toast } from 'sonner';
-import { Plus, Building2, Users, CalendarCheck } from 'lucide-react';
+import { Plus, Building2, Users, CalendarCheck, Download } from 'lucide-react';
 import DashboardLayout from '@/components/DashboardLayout';
 
 interface Department {
@@ -28,7 +28,7 @@ interface AttendanceRow {
   department_id: string;
   date: string;
   status: string;
-  students: { name: string } | null;
+  students: { name: string; matric_no: string | null; gender: string | null } | null;
   departments: { name: string } | null;
 }
 
@@ -42,6 +42,7 @@ const SuperAdminDashboard = () => {
   const [selectedRole, setSelectedRole] = useState('');
   const [activeTab, setActiveTab] = useState<'departments' | 'users' | 'attendance'>('departments');
   const [filterDept, setFilterDept] = useState<string>('all');
+  const [filterDate, setFilterDate] = useState<string>('');
 
   const fetchDepartments = async () => {
     const { data } = await supabase.from('departments').select('*').order('name');
@@ -56,12 +57,15 @@ const SuperAdminDashboard = () => {
   const fetchAttendance = async () => {
     let query = (supabase as any)
       .from('attendance')
-      .select('id, student_ref, department_id, date, status, students:student_ref(name), departments(name)')
+      .select('id, student_ref, department_id, date, status, students:student_ref(name, matric_no, gender), departments(name)')
       .order('date', { ascending: false })
-      .limit(200);
+      .limit(500);
 
     if (filterDept && filterDept !== 'all') {
       query = query.eq('department_id', filterDept);
+    }
+    if (filterDate) {
+      query = query.eq('date', filterDate);
     }
 
     const { data } = await query;
@@ -75,7 +79,7 @@ const SuperAdminDashboard = () => {
 
   useEffect(() => {
     fetchAttendance();
-  }, [filterDept]);
+  }, [filterDept, filterDate]);
 
   const createDepartment = async () => {
     if (!newDeptName.trim()) return;
@@ -118,6 +122,38 @@ const SuperAdminDashboard = () => {
       fetchUsers();
     }
   };
+
+  const exportAttendanceCSV = () => {
+    if (attendance.length === 0) {
+      toast.error('No records to export');
+      return;
+    }
+    const headers = ['S/N', 'Name', 'Gender', 'Matric No', 'Department', 'Date', 'Status'];
+    const rows = attendance.map((a, i) => [
+      String(i + 1),
+      a.students?.name ?? 'Unknown',
+      a.students?.gender ?? '',
+      a.students?.matric_no ?? '',
+      a.departments?.name ?? 'Unknown',
+      a.date,
+      a.status,
+    ].map(c => `"${String(c).replace(/"/g, '""')}"`).join(','));
+
+    const csv = [headers.join(','), ...rows].join('\n');
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    const deptLabel = filterDept !== 'all' ? departments.find(d => d.id === filterDept)?.name || 'dept' : 'all';
+    a.download = `attendance_${deptLabel}_${filterDate || 'all-dates'}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+    toast.success('CSV exported');
+  };
+
+  // Summary stats
+  const presentCount = attendance.filter(a => a.status === 'present').length;
+  const absentCount = attendance.filter(a => a.status === 'absent').length;
 
   const statusStyles: Record<string, string> = {
     present: 'bg-success text-success-foreground',
@@ -217,53 +253,98 @@ const SuperAdminDashboard = () => {
         )}
 
         {activeTab === 'attendance' && (
-          <Card>
-            <CardHeader>
-              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-                <CardTitle className="text-lg">Attendance Records</CardTitle>
-                <Select value={filterDept} onValueChange={setFilterDept}>
-                  <SelectTrigger className="w-[200px]"><SelectValue placeholder="Filter by department" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All Departments</SelectItem>
-                    {departments.map(d => <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>)}
-                  </SelectContent>
-                </Select>
-              </div>
-            </CardHeader>
-            <CardContent>
-              <div className="overflow-x-auto">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Student</TableHead>
-                      <TableHead>Department</TableHead>
-                      <TableHead>Date</TableHead>
-                      <TableHead>Status</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {attendance.map(a => (
-                      <TableRow key={a.id}>
-                        <TableCell>{a.students?.name ?? 'Unknown'}</TableCell>
-                        <TableCell>{a.departments?.name ?? 'Unknown'}</TableCell>
-                        <TableCell>{a.date}</TableCell>
-                        <TableCell>
-                          <span className={`text-xs px-2 py-0.5 rounded-full font-medium capitalize ${statusStyles[a.status] || 'bg-muted text-muted-foreground'}`}>
-                            {a.status}
-                          </span>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                    {attendance.length === 0 && (
-                      <TableRow>
-                        <TableCell colSpan={4} className="text-center text-muted-foreground">No attendance records yet</TableCell>
-                      </TableRow>
+          <div className="space-y-4">
+            {/* Summary cards */}
+            <div className="grid grid-cols-3 gap-4">
+              <Card>
+                <CardContent className="pt-4 pb-3 text-center">
+                  <p className="text-2xl font-bold">{attendance.length}</p>
+                  <p className="text-xs text-muted-foreground">Total Records</p>
+                </CardContent>
+              </Card>
+              <Card>
+                <CardContent className="pt-4 pb-3 text-center">
+                  <p className="text-2xl font-bold text-green-600">{presentCount}</p>
+                  <p className="text-xs text-muted-foreground">Present</p>
+                </CardContent>
+              </Card>
+              <Card>
+                <CardContent className="pt-4 pb-3 text-center">
+                  <p className="text-2xl font-bold text-red-600">{absentCount}</p>
+                  <p className="text-xs text-muted-foreground">Absent</p>
+                </CardContent>
+              </Card>
+            </div>
+
+            <Card>
+              <CardHeader>
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                  <CardTitle className="text-lg">Attendance Records</CardTitle>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <Select value={filterDept} onValueChange={setFilterDept}>
+                      <SelectTrigger className="w-[180px]"><SelectValue placeholder="Filter department" /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">All Departments</SelectItem>
+                        {departments.map(d => <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                    <Input
+                      type="date"
+                      value={filterDate}
+                      onChange={e => setFilterDate(e.target.value)}
+                      className="w-[160px]"
+                      placeholder="Filter by date"
+                    />
+                    {filterDate && (
+                      <Button variant="ghost" size="sm" onClick={() => setFilterDate('')}>Clear date</Button>
                     )}
-                  </TableBody>
-                </Table>
-              </div>
-            </CardContent>
-          </Card>
+                    <Button variant="outline" onClick={exportAttendanceCSV} disabled={attendance.length === 0}>
+                      <Download className="w-4 h-4 mr-1" /> Export CSV
+                    </Button>
+                  </div>
+                </div>
+              </CardHeader>
+              <CardContent>
+                <div className="overflow-x-auto">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead className="w-12">S/N</TableHead>
+                        <TableHead>Student</TableHead>
+                        <TableHead>Gender</TableHead>
+                        <TableHead>Matric No</TableHead>
+                        <TableHead>Department</TableHead>
+                        <TableHead>Date</TableHead>
+                        <TableHead>Status</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {attendance.map((a, idx) => (
+                        <TableRow key={a.id}>
+                          <TableCell className="text-center font-medium">{idx + 1}</TableCell>
+                          <TableCell className="font-medium">{a.students?.name ?? 'Unknown'}</TableCell>
+                          <TableCell>{a.students?.gender ? a.students.gender.charAt(0) : ''}</TableCell>
+                          <TableCell>{a.students?.matric_no ?? ''}</TableCell>
+                          <TableCell>{a.departments?.name ?? 'Unknown'}</TableCell>
+                          <TableCell>{a.date}</TableCell>
+                          <TableCell>
+                            <span className={`text-xs px-2 py-0.5 rounded-full font-medium capitalize ${statusStyles[a.status] || 'bg-muted text-muted-foreground'}`}>
+                              {a.status}
+                            </span>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                      {attendance.length === 0 && (
+                        <TableRow>
+                          <TableCell colSpan={7} className="text-center text-muted-foreground">No attendance records found</TableCell>
+                        </TableRow>
+                      )}
+                    </TableBody>
+                  </Table>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
         )}
       </div>
     </DashboardLayout>
