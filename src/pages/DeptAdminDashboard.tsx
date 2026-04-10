@@ -150,11 +150,16 @@ const DeptAdminDashboard = () => {
     }
 
     setSavingAttendance(true);
-    const { error } = await (supabase as any).from('attendance').insert(rows);
+    const { error } = await (supabase as any)
+    .from('attendance')
+    .upsert(rows, {
+    onConflict: 'student_ref,date'
+  });
     if (error) {
       toast.error(error.message);
     } else {
       toast.success(`Saved ${rows.length} attendance records`);
+      await fetchAttendanceGrid();
       fetchHistory();
     }
     setSavingAttendance(false);
