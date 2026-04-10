@@ -519,7 +519,7 @@ const DeptAdminDashboard = () => {
                         <TableHead>Name</TableHead>
                         <TableHead>Gender</TableHead>
                         <TableHead>Matric No</TableHead>
-                      </TableRow>
+                        <TableHead className="w-16">Action</TableHead>
                     </TableHeader>
                     <TableBody>
                       {students.map(student => {
