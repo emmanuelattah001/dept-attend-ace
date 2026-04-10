@@ -52,6 +52,7 @@ const DeptAdminDashboard = () => {
     fetchStudents();
     fetchHistory();
     fetchDepartmentName();
+    fetchAttendanceGrid();
   }, [profile?.department_id]);
 
   const fetchDepartmentName = async () => {
@@ -154,11 +155,32 @@ const DeptAdminDashboard = () => {
       toast.error(error.message);
     } else {
       toast.success(`Saved ${rows.length} attendance records`);
-      setGrid({});
       fetchHistory();
     }
     setSavingAttendance(false);
   };
+
+  const fetchAttendanceGrid = async () => {
+  if (!profile?.department_id) return;
+
+  const { data } = await supabase
+    .from('attendance')
+    .select('student_ref, date, status')
+    .eq('department_id', profile.department_id);
+
+  if (!data) return;
+
+  const newGrid: any = {};
+
+  data.forEach((r: any) => {
+    const val = r.status === 'present' ? 'P' : 'A';
+
+    if (!newGrid[r.student_ref]) newGrid[r.student_ref] = {};
+    newGrid[r.student_ref][r.date] = val;
+  });
+
+  setGrid(newGrid);
+};
 
   const exportCSV = () => {
     if (students.length === 0) {
@@ -197,7 +219,7 @@ const DeptAdminDashboard = () => {
   }
 
   const data = students.map((s, i) => {
-    const row = {
+    const row: any = {
       "S/N": i + 1,
       "Name": s.name,
       "Gender": s.gender || '',
@@ -206,7 +228,10 @@ const DeptAdminDashboard = () => {
     };
 
     dateColumns.forEach(d => {
-      row[d] = grid[s.id]?.[d] || '';
+      const value = grid[s.id]?.[d] || '';
+
+      // optional: make it readable in Excel
+      row[d] = value === 'P' ? 'Present' : value === 'A' ? 'Absent' : '';
     });
 
     return row;
@@ -214,37 +239,20 @@ const DeptAdminDashboard = () => {
 
   const worksheet = XLSX.utils.json_to_sheet(data);
 
-  // ✅ AUTO COLUMN WIDTH
-  const columnWidths = Object.keys(data[0]).map(key => ({
+  // ✅ AUTO COLUMN WIDTH FIX
+  const cols = Object.keys(data[0]).map(key => ({
     wch: Math.max(
       key.length,
-      ...data.map(row => String(row[key] || "").length)
-    )
+      ...data.map(row => String(row[key] || '').length)
+    ) + 2
   }));
-  worksheet["!cols"] = columnWidths;
 
-  // ✅ WRAP TEXT + ALIGNMENT
-  const range = XLSX.utils.decode_range(worksheet["!ref"]);
-  for (let R = range.s.r; R <= range.e.r; ++R) {
-    for (let C = range.s.c; C <= range.e.c; ++C) {
-      const cell = XLSX.utils.encode_cell({ r: R, c: C });
-      if (!worksheet[cell]) continue;
-
-      if (!worksheet[cell].s) worksheet[cell].s = {};
-      worksheet[cell].s.alignment = {
-        wrapText: true,
-        vertical: "top"
-      };
-    }
-  }
+  worksheet['!cols'] = cols;
 
   const workbook = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(workbook, worksheet, "Attendance");
 
-  // ✅ IMPORTANT: enable styles
-  XLSX.writeFile(workbook, `attendance_${departmentName}.xlsx`, {
-    cellStyles: true
-  });
+  XLSX.writeFile(workbook, `attendance_${departmentName}.xlsx`);
 
   toast.success('Excel exported');
 };
