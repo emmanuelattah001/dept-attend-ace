@@ -8,7 +8,7 @@ import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { toast } from 'sonner';
-import { CalendarCheck, Download, History, Users, Plus, Upload, Save, Trash2 } from 'lucide-react';
+import { CalendarCheck, Download, History, Users, Plus, Upload, Save, Trash2, Share2 } from 'lucide-react';
 import DashboardLayout from '@/components/DashboardLayout';
 import * as XLSX from "xlsx";
 
@@ -262,6 +262,27 @@ const DeptAdminDashboard = () => {
   toast.success('Excel exported');
 };
 
+
+const handleShare = async () => {
+  const shareData = {
+    title: 'Attendance System',
+    text: `Check attendance for ${departmentName}`,
+    url: window.location.href,
+  };
+
+  if (navigator.share) {
+    try {
+      await navigator.share(shareData);
+    } catch (err) {
+      console.log(err);
+    }
+  } else {
+    // fallback to WhatsApp
+    const url = `https://wa.me/?text=${encodeURIComponent(shareData.text + ' ' + shareData.url)}`;
+    window.open(url, '_blank');
+  }
+};
+
   const updateStudentField = (id: string, field: string, value: string) => {
     setStudentEdits(prev => ({
       ...prev,
@@ -459,6 +480,10 @@ const DeptAdminDashboard = () => {
                   <Button variant="outline" onClick={exportCSV} disabled={students.length === 0}>
                     <Download className="w-4 h-4 mr-1" /> Export CSV
                   </Button>
+                  <Button variant="outline" onClick={handleShare}>
+                        <Share2 className="w-4 h-4 mr-1" />
+                        Share
+                      </Button>
                   <Button variant="outline" onClick={exportExcel}>
                   <Download className="w-4 h-4 mr-1" /> Excel
                   </Button>
