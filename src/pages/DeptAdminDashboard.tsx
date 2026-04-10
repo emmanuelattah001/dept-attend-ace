@@ -213,11 +213,38 @@ const DeptAdminDashboard = () => {
   });
 
   const worksheet = XLSX.utils.json_to_sheet(data);
-  const workbook = XLSX.utils.book_new();
 
+  // ✅ AUTO COLUMN WIDTH
+  const columnWidths = Object.keys(data[0]).map(key => ({
+    wch: Math.max(
+      key.length,
+      ...data.map(row => String(row[key] || "").length)
+    )
+  }));
+  worksheet["!cols"] = columnWidths;
+
+  // ✅ WRAP TEXT + ALIGNMENT
+  const range = XLSX.utils.decode_range(worksheet["!ref"]);
+  for (let R = range.s.r; R <= range.e.r; ++R) {
+    for (let C = range.s.c; C <= range.e.c; ++C) {
+      const cell = XLSX.utils.encode_cell({ r: R, c: C });
+      if (!worksheet[cell]) continue;
+
+      if (!worksheet[cell].s) worksheet[cell].s = {};
+      worksheet[cell].s.alignment = {
+        wrapText: true,
+        vertical: "top"
+      };
+    }
+  }
+
+  const workbook = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(workbook, worksheet, "Attendance");
 
-  XLSX.writeFile(workbook, `attendance_${departmentName}.xlsx`);
+  // ✅ IMPORTANT: enable styles
+  XLSX.writeFile(workbook, `attendance_${departmentName}.xlsx`, {
+    cellStyles: true
+  });
 
   toast.success('Excel exported');
 };
