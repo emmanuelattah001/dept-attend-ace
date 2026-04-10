@@ -249,6 +249,17 @@ const DeptAdminDashboard = () => {
     setAddingStudent(false);
   };
 
+  const deleteStudent = async (id: string, name: string) => {
+    if (!confirm(`Delete student "${name}"? This cannot be undone.`)) return;
+    const { error } = await (supabase as any).from('students').delete().eq('id', id);
+    if (error) {
+      toast.error(error.message);
+    } else {
+      toast.success('Student deleted');
+      fetchStudents();
+    }
+  };
+
   const handleCSVImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file || !profile?.department_id) return;
