@@ -520,6 +520,7 @@ const DeptAdminDashboard = () => {
                         <TableHead>Gender</TableHead>
                         <TableHead>Matric No</TableHead>
                         <TableHead className="w-16">Action</TableHead>
+                      </TableRow>
                     </TableHeader>
                     <TableBody>
                       {students.map(student => {
@@ -540,6 +541,11 @@ const DeptAdminDashboard = () => {
                             </TableCell>
                             <TableCell>
                               <Input value={edits.matric_no ?? student.matric_no ?? ''} onChange={(e) => updateStudentField(student.id, 'matric_no', e.target.value)} placeholder="e.g. MAT/2024/001" className="min-w-[160px]" />
+                            </TableCell>
+                            <TableCell>
+                              <Button variant="ghost" size="icon" onClick={() => deleteStudent(student.id, student.name)} className="text-destructive hover:text-destructive">
+                                <Trash2 className="w-4 h-4" />
+                              </Button>
                             </TableCell>
                           </TableRow>
                         );
