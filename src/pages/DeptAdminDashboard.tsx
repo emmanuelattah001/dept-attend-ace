@@ -178,7 +178,7 @@ const DeptAdminDashboard = () => {
       return cells.map(c => `"${c.replace(/"/g, '""')}"`).join(',');
     });
 
-    const csv = [headers.join(','), ...rows].join('\n');
+    const csv =  "\uFEFF" + [headers.join(','), ...rows].join('\n');
     const blob = new Blob([csv], { type: 'text/csv' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
