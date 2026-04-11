@@ -5,6 +5,7 @@ import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { AuthProvider } from "@/hooks/useAuth";
 import Index from "./pages/Index.tsx";
+import AuthPage from "./pages/AuthPage.tsx";
 import NotFound from "./pages/NotFound.tsx";
 import InstallPage from "./pages/InstallPage.tsx";
 import CheckAttendance from "./pages/CheckAttendance.tsx";
@@ -20,6 +21,7 @@ const App = () => (
         <BrowserRouter>
           <Routes>
             <Route path="/" element={<Index />} />
+            <Route path="/login" element={<AuthPage />} />
             <Route path="/install" element={<InstallPage />} />
             <Route path="/check-attendance" element={<CheckAttendance />} />
             <Route path="*" element={<NotFound />} />
