@@ -74,7 +74,7 @@ const CheckAttendance = () => {
           <CardContent className="pt-6">
             <div className="flex gap-2">
               <Input
-                placeholder="Enter matric number e.g. CSC/2023/001"
+                placeholder="AU25AC8017"
                 value={matricNo}
                 onChange={e => setMatricNo(e.target.value)}
                 onKeyDown={e => e.key === 'Enter' && handleSearch()}
