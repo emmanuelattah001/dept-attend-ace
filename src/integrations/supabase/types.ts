@@ -196,6 +196,14 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      get_attendance_by_matric: {
+        Args: { _matric_no: string }
+        Returns: {
+          attendance_date: string
+          department_name: string
+          status: string
+        }[]
+      }
       get_user_department: { Args: { _user_id: string }; Returns: string }
       has_role: {
         Args: {
