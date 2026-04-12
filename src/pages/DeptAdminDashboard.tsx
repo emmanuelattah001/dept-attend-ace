@@ -592,7 +592,8 @@ const generatePDF = (): jsPDF => {
                   </Button>
                 </div>
               </div>
-              <p className="text-xs text-muted-foreground mt-1">Click a cell to toggle: empty → P (Present) → A (Absent) → empty</p>
+              <p className="text-xs text-muted-foreground mt-1">Click a cell to toggle: empty → <Check className="inline w-3 h-3 text-green-600" /> (Present) → <X className="inline w-3 h-3 text-red-600" /> (Absent) → empty</p>
+              <p className="text-xs text-muted-foreground">Use bulk buttons below each date to mark all students at once.</p>
             </CardHeader>
             <CardContent>
               {students.length === 0 ? (
