@@ -8,7 +8,7 @@ import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { toast } from 'sonner';
-import { CalendarCheck, Download, History, Users, Plus, Upload, Save, Trash2, Share2 } from 'lucide-react';
+import { CalendarCheck, Download, History, Users, Plus, Upload, Save, Trash2, Share2, Check, X, CheckCheck, XCircle } from 'lucide-react';
 import DashboardLayout from '@/components/DashboardLayout';
 import * as XLSX from "xlsx";
 import jsPDF from 'jspdf';
@@ -138,6 +138,16 @@ const DeptAdminDashboard = () => {
         ...prev,
         [studentId]: { ...prev[studentId], [date]: next },
       };
+    });
+  };
+
+  const markAllForDate = (date: string, status: 'P' | 'A') => {
+    setGrid(prev => {
+      const next = { ...prev };
+      for (const student of students) {
+        next[student.id] = { ...next[student.id], [date]: status };
+      }
+      return next;
     });
   };
 
@@ -582,7 +592,8 @@ const generatePDF = (): jsPDF => {
                   </Button>
                 </div>
               </div>
-              <p className="text-xs text-muted-foreground mt-1">Click a cell to toggle: empty → P (Present) → A (Absent) → empty</p>
+              <p className="text-xs text-muted-foreground mt-1">Click a cell to toggle: empty → <Check className="inline w-3 h-3 text-green-600" /> (Present) → <X className="inline w-3 h-3 text-red-600" /> (Absent) → empty</p>
+              <p className="text-xs text-muted-foreground">Use bulk buttons below each date to mark all students at once.</p>
             </CardHeader>
             <CardContent>
               {students.length === 0 ? (
@@ -606,6 +617,22 @@ const generatePDF = (): jsPDF => {
                                 onChange={e => updateDateColumn(i, e.target.value)}
                                 className="h-7 text-xs w-[120px] px-1"
                               />
+                              <div className="flex items-center gap-1">
+                                <button
+                                  onClick={() => markAllForDate(date, 'P')}
+                                  className="text-[10px] px-1.5 py-0.5 rounded bg-green-100 text-green-700 hover:bg-green-200 dark:bg-green-900 dark:text-green-300 dark:hover:bg-green-800 flex items-center gap-0.5"
+                                  title="Mark all present"
+                                >
+                                  <CheckCheck className="w-3 h-3" /> All
+                                </button>
+                                <button
+                                  onClick={() => markAllForDate(date, 'A')}
+                                  className="text-[10px] px-1.5 py-0.5 rounded bg-red-100 text-red-700 hover:bg-red-200 dark:bg-red-900 dark:text-red-300 dark:hover:bg-red-800 flex items-center gap-0.5"
+                                  title="Mark all absent"
+                                >
+                                  <XCircle className="w-3 h-3" /> All
+                                </button>
+                              </div>
                               {dateColumns.length > 1 && (
                                 <button onClick={() => removeDateColumn(i)} className="text-[10px] text-destructive hover:underline">
                                   remove
@@ -631,9 +658,9 @@ const generatePDF = (): jsPDF => {
                               <TableCell key={i} className="text-center p-1">
                                 <button
                                   onClick={() => toggleCell(student.id, date)}
-                                  className={`w-full h-8 rounded text-xs font-bold transition-colors ${cellStyles[val]}`}
+                                  className={`w-full h-8 rounded text-xs font-bold transition-colors flex items-center justify-center ${cellStyles[val]}`}
                                 >
-                                  {val || '—'}
+                                  {val === 'P' ? <Check className="w-4 h-4" /> : val === 'A' ? <X className="w-4 h-4" /> : '—'}
                                 </button>
                               </TableCell>
                             );
