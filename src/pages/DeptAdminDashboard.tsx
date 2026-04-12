@@ -10,6 +10,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { toast } from 'sonner';
 import { CalendarCheck, Download, History, Users, Plus, Upload, Save, Trash2, Share2, Check, X, CheckCheck, XCircle } from 'lucide-react';
 import DashboardLayout from '@/components/DashboardLayout';
+import LoadingScreen from '@/components/LoadingScreen';
 import * as XLSX from "xlsx";
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -52,13 +53,12 @@ const DeptAdminDashboard = () => {
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [importing, setImporting] = useState(false);
+  const [initialLoading, setInitialLoading] = useState(true);
 
   useEffect(() => {
     if (!profile?.department_id) return;
-    fetchStudents();
-    fetchHistory();
-    fetchDepartmentName();
-    fetchAttendanceGrid();
+    Promise.all([fetchStudents(), fetchHistory(), fetchDepartmentName(), fetchAttendanceGrid()])
+      .finally(() => setInitialLoading(false));
   }, [profile?.department_id]);
 
   const fetchDepartmentName = async () => {
@@ -541,6 +541,10 @@ const generatePDF = (): jsPDF => {
     { id: 'students' as const, label: 'Students', icon: Users },
     { id: 'history' as const, label: 'History', icon: History },
   ];
+
+  if (initialLoading) {
+    return <LoadingScreen message="Loading dashboard..." />;
+  }
 
   return (
     <DashboardLayout>
