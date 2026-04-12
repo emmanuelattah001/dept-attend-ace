@@ -5,6 +5,7 @@ import DeptAdminDashboard from './DeptAdminDashboard';
 import StudentDashboard from './StudentDashboard';
 import { Button } from '@/components/ui/button';
 import { ClipboardCheck, Download, Search, LogIn } from 'lucide-react';
+import LoadingScreen from '@/components/LoadingScreen';
 
 const LandingPage = () => {
   const navigate = useNavigate();
@@ -40,11 +41,7 @@ const Index = () => {
   const { session, role, loading } = useAuth();
 
   if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-background">
-        <div className="animate-pulse text-muted-foreground">Loading...</div>
-      </div>
-    );
+    return <LoadingScreen />;
   }
 
   if (!session) return <LandingPage />;
