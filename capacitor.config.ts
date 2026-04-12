@@ -2,10 +2,10 @@ import type { CapacitorConfig } from '@capacitor/cli';
 
 const config: CapacitorConfig = {
   appId: 'com.emmytech.attendance',
-  appName: 'com.emmytech.attendance',
+  appName: 'attendance',
   webDir: 'dist',
   server: {
-    url: 'https://smart-attendance-hub-ten.vercel.app/',
+    url: 'https://google.com',
     cleartext: true,
   },
 };
