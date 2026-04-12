@@ -4,7 +4,7 @@ import SuperAdminDashboard from './SuperAdminDashboard';
 import DeptAdminDashboard from './DeptAdminDashboard';
 import StudentDashboard from './StudentDashboard';
 import { Button } from '@/components/ui/button';
-import { ClipboardCheck, Download, Search, LogIn } from 'lucide-react';
+import { ClipboardCheck, Download, Search, LogIn, Loader2 } from 'lucide-react';
 
 const LandingPage = () => {
   const navigate = useNavigate();
