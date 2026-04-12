@@ -5,6 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { CalendarCheck, CheckCircle, XCircle } from 'lucide-react';
 import DashboardLayout from '@/components/DashboardLayout';
+import LoadingScreen from '@/components/LoadingScreen';
 
 interface AttendanceRecord {
   id: string;
@@ -17,6 +18,7 @@ const StudentDashboard = () => {
   const { user } = useAuth();
   const [records, setRecords] = useState<AttendanceRecord[]>([]);
   const [stats, setStats] = useState({ present: 0, absent: 0 });
+  const [initialLoading, setInitialLoading] = useState(true);
 
   useEffect(() => {
     if (!user) return;
@@ -34,6 +36,7 @@ const StudentDashboard = () => {
           absent: typed.filter(r => r.status === 'absent').length,
         });
       }
+      setInitialLoading(false);
     };
     fetchAttendance();
   }, [user]);
@@ -45,6 +48,10 @@ const StudentDashboard = () => {
     present: 'bg-success text-success-foreground',
     absent: 'bg-destructive text-destructive-foreground',
   };
+
+  if (initialLoading) {
+    return <LoadingScreen message="Loading attendance..." />;
+  }
 
   return (
     <DashboardLayout>

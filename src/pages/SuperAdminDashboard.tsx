@@ -8,6 +8,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { toast } from 'sonner';
 import { Plus, Building2, Users, CalendarCheck, Download } from 'lucide-react';
 import DashboardLayout from '@/components/DashboardLayout';
+import LoadingScreen from '@/components/LoadingScreen';
 
 interface Department {
   id: string;
@@ -43,6 +44,7 @@ const SuperAdminDashboard = () => {
   const [activeTab, setActiveTab] = useState<'departments' | 'users' | 'attendance'>('departments');
   const [filterDept, setFilterDept] = useState<string>('all');
   const [filterDate, setFilterDate] = useState<string>('');
+  const [initialLoading, setInitialLoading] = useState(true);
 
   const fetchDepartments = async () => {
     const { data } = await supabase.from('departments').select('*').order('name');
@@ -73,8 +75,8 @@ const SuperAdminDashboard = () => {
   };
 
   useEffect(() => {
-    fetchDepartments();
-    fetchUsers();
+    Promise.all([fetchDepartments(), fetchUsers()])
+      .finally(() => setInitialLoading(false));
   }, []);
 
   useEffect(() => {
@@ -165,6 +167,10 @@ const SuperAdminDashboard = () => {
     { key: 'users' as const, label: 'Manage Users', icon: Users },
     { key: 'attendance' as const, label: 'All Attendance', icon: CalendarCheck },
   ];
+
+  if (initialLoading) {
+    return <LoadingScreen message="Loading dashboard..." />;
+  }
 
   return (
     <DashboardLayout>
