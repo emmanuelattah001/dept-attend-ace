@@ -141,6 +141,16 @@ const DeptAdminDashboard = () => {
     });
   };
 
+  const markAllForDate = (date: string, status: 'P' | 'A') => {
+    setGrid(prev => {
+      const next = { ...prev };
+      for (const student of students) {
+        next[student.id] = { ...next[student.id], [date]: status };
+      }
+      return next;
+    });
+  };
+
   const saveAttendance = async () => {
     if (!profile?.department_id || !user?.id) return;
 
