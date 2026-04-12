@@ -4,7 +4,7 @@ import SuperAdminDashboard from './SuperAdminDashboard';
 import DeptAdminDashboard from './DeptAdminDashboard';
 import StudentDashboard from './StudentDashboard';
 import { Button } from '@/components/ui/button';
-import { ClipboardCheck, Download, Search, LogIn } from 'lucide-react';
+import { ClipboardCheck, Download, Search, LogIn, Loader2 } from 'lucide-react';
 
 const LandingPage = () => {
   const navigate = useNavigate();
@@ -41,8 +41,12 @@ const Index = () => {
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-background">
-        <div className="animate-pulse text-muted-foreground">Loading...</div>
+      <div className="min-h-screen flex flex-col items-center justify-center bg-background gap-4">
+        <div className="w-16 h-16 bg-primary rounded-2xl flex items-center justify-center animate-bounce">
+          <ClipboardCheck className="w-8 h-8 text-primary-foreground" />
+        </div>
+        <Loader2 className="w-6 h-6 text-primary animate-spin" />
+        <p className="text-sm text-muted-foreground animate-pulse">Loading...</p>
       </div>
     );
   }
