@@ -617,6 +617,22 @@ const generatePDF = (): jsPDF => {
                                 onChange={e => updateDateColumn(i, e.target.value)}
                                 className="h-7 text-xs w-[120px] px-1"
                               />
+                              <div className="flex items-center gap-1">
+                                <button
+                                  onClick={() => markAllForDate(date, 'P')}
+                                  className="text-[10px] px-1.5 py-0.5 rounded bg-green-100 text-green-700 hover:bg-green-200 dark:bg-green-900 dark:text-green-300 dark:hover:bg-green-800 flex items-center gap-0.5"
+                                  title="Mark all present"
+                                >
+                                  <CheckCheck className="w-3 h-3" /> All
+                                </button>
+                                <button
+                                  onClick={() => markAllForDate(date, 'A')}
+                                  className="text-[10px] px-1.5 py-0.5 rounded bg-red-100 text-red-700 hover:bg-red-200 dark:bg-red-900 dark:text-red-300 dark:hover:bg-red-800 flex items-center gap-0.5"
+                                  title="Mark all absent"
+                                >
+                                  <XCircle className="w-3 h-3" /> All
+                                </button>
+                              </div>
                               {dateColumns.length > 1 && (
                                 <button onClick={() => removeDateColumn(i)} className="text-[10px] text-destructive hover:underline">
                                   remove
