@@ -658,9 +658,9 @@ const generatePDF = (): jsPDF => {
                               <TableCell key={i} className="text-center p-1">
                                 <button
                                   onClick={() => toggleCell(student.id, date)}
-                                  className={`w-full h-8 rounded text-xs font-bold transition-colors ${cellStyles[val]}`}
+                                  className={`w-full h-8 rounded text-xs font-bold transition-colors flex items-center justify-center ${cellStyles[val]}`}
                                 >
-                                  {val || '—'}
+                                  {val === 'P' ? <Check className="w-4 h-4" /> : val === 'A' ? <X className="w-4 h-4" /> : '—'}
                                 </button>
                               </TableCell>
                             );
