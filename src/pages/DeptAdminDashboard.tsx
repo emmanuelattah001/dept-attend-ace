@@ -54,6 +54,9 @@ const DeptAdminDashboard = () => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [importing, setImporting] = useState(false);
   const [initialLoading, setInitialLoading] = useState(true);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [filterPercent, setFilterPercent] = useState<string>('all');
+  const [deletingHistory, setDeletingHistory] = useState(false);
 
   useEffect(() => {
     if (!profile?.department_id) return;
