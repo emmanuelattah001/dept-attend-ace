@@ -514,6 +514,56 @@ const generatePDF = (): jsPDF => {
     setImporting(false);
   };
 
+  const deleteAllHistory = async () => {
+    if (!confirm('Are you sure you want to delete ALL attendance history? This cannot be undone.')) return;
+    if (!profile?.department_id) return;
+    setDeletingHistory(true);
+    const { error } = await (supabase as any)
+      .from('attendance')
+      .delete()
+      .eq('department_id', profile.department_id);
+    if (error) {
+      toast.error(error.message);
+    } else {
+      toast.success('All attendance history deleted');
+      setHistory([]);
+      setGrid({});
+    }
+    setDeletingHistory(false);
+  };
+
+  // Compute attendance percentages per student
+  const studentStats = useMemo(() => {
+    const month = new Date().toISOString().slice(0, 7);
+    return students.map(student => {
+      const records = history.filter(
+        r => r.student_ref === student.id && r.date.startsWith(month)
+      );
+      const total = records.length;
+      const present = records.filter(r => r.status === 'present').length;
+      const percent = total ? (present / total) * 100 : 0;
+      return { ...student, present, total, percent };
+    });
+  }, [students, history]);
+
+  // Filtered students for history tab
+  const filteredStats = useMemo(() => {
+    let result = studentStats;
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase();
+      result = result.filter(s =>
+        s.name.toLowerCase().includes(q) ||
+        (s.matric_no && s.matric_no.toLowerCase().includes(q))
+      );
+    }
+    if (filterPercent === 'below75') {
+      result = result.filter(s => s.percent < 75);
+    } else if (filterPercent === 'above75') {
+      result = result.filter(s => s.percent >= 75);
+    }
+    return result;
+  }, [studentStats, searchQuery, filterPercent]);
+
   if (!profile?.department_id) {
     return (
       <DashboardLayout>
