@@ -344,12 +344,28 @@ const generatePDF = (): jsPDF => {
     },
   });
 
-  // 📄 FOOTER
+  // 📄 FOOTER + WATERMARK
   const pageCount = doc.getNumberOfPages();
+  const pageWidth = doc.internal.pageSize.getWidth();
+  const pageHeight = doc.internal.pageSize.getHeight();
 
   for (let i = 1; i <= pageCount; i++) {
     doc.setPage(i);
+
+    // Watermark
+    doc.saveGraphicsState();
+    doc.setFontSize(60);
+    doc.setTextColor(200, 200, 200);
+    doc.setGState(new (doc as any).GState({ opacity: 0.15 }));
+    doc.text('Attendtrack', pageWidth / 2, pageHeight / 2, {
+      align: 'center',
+      angle: 45,
+    });
+    doc.restoreGraphicsState();
+
+    // Page number
     doc.setFontSize(10);
+    doc.setTextColor(0, 0, 0);
     doc.text(
       `Page ${i} of ${pageCount}`,
       105,
