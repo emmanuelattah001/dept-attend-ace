@@ -44,7 +44,12 @@ const AuthPage = () => {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-background p-4">
+    <div className="min-h-screen flex flex-col items-center justify-center bg-background p-4">
+      <div className="w-full max-w-md mb-4">
+        <Button variant="ghost" size="sm" onClick={() => navigate('/')}>
+          <ArrowLeft className="w-4 h-4 mr-1" /> Back to Home
+        </Button>
+      </div>
       <Card className="w-full max-w-md animate-fade-in">
         <CardHeader className="text-center space-y-2">
           <div className="mx-auto w-12 h-12 bg-primary rounded-xl flex items-center justify-center mb-2">
