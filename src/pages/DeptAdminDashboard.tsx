@@ -8,7 +8,7 @@ import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { toast } from 'sonner';
-import { CalendarCheck, Download, History, Users, Plus, Upload, Save, Trash2, Share2, Check, X, CheckCheck, XCircle, Search, AlertTriangle, Mail, MessageCircle, Send, Smartphone } from 'lucide-react';
+import { CalendarCheck, Download, History, Users, Plus, Upload, Save, Trash2, Share2, Check, X, CheckCheck, XCircle, Search, AlertTriangle } from 'lucide-react';
 import DashboardLayout from '@/components/DashboardLayout';
 import LoadingScreen from '@/components/LoadingScreen';
 import * as XLSX from "xlsx";
@@ -57,8 +57,7 @@ const DeptAdminDashboard = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [filterPercent, setFilterPercent] = useState<string>('all');
   const [deletingHistory, setDeletingHistory] = useState(false);
-  const [showShareDialog, setShowShareDialog] = useState(false);
-  const [pdfBlobUrl, setPdfBlobUrl] = useState<string | null>(null);
+
   useEffect(() => {
     if (!profile?.department_id) return;
     Promise.all([fetchStudents(), fetchHistory(), fetchDepartmentName(), fetchAttendanceGrid()])
@@ -395,26 +394,19 @@ const generatePDF = (): jsPDF => {
   return doc;
 };
 
-  const preparePDFForShare = () => {
+  const sharePDF = async () => {
     if (history.length === 0) {
       toast.error('No attendance history to share');
       return;
     }
-    // Revoke old blob URL
-    if (pdfBlobUrl) URL.revokeObjectURL(pdfBlobUrl);
 
     const doc = generatePDF();
-    const blob = doc.output('blob');
-    const url = URL.createObjectURL(blob);
-    setPdfBlobUrl(url);
-    setShowShareDialog(true);
-  };
+    const pdfBlob = doc.output('blob');
+    const file = new File([pdfBlob], `attendance_${departmentName}.pdf`, {
+      type: 'application/pdf',
+    });
 
-  const shareViaNative = async () => {
-    if (!pdfBlobUrl) return;
-    const blob = await fetch(pdfBlobUrl).then(r => r.blob());
-    const file = new File([blob], `attendance_${departmentName}.pdf`, { type: 'application/pdf' });
-
+    // Try native share first
     if (navigator.share) {
       try {
         const canShare = navigator.canShare?.({ files: [file] });
@@ -424,49 +416,17 @@ const generatePDF = (): jsPDF => {
             text: `Attendance report for ${departmentName}`,
             files: [file],
           });
-          setShowShareDialog(false);
           return;
         }
       } catch (err: any) {
-        if (err?.name === 'AbortError') return;
+        if (err?.name === 'AbortError') return; // user cancelled
+        console.warn('Share failed, falling back to download', err);
       }
     }
-    toast.error('Native sharing not supported on this device');
-  };
 
-  const shareViaWhatsApp = () => {
-    if (!pdfBlobUrl) return;
-    // WhatsApp can't receive files via URL scheme, so we download + instruct
-    downloadPDF();
-    const text = encodeURIComponent(`Attendance Report - ${departmentName}\n(PDF attached separately)`);
-    window.open(`https://wa.me/?text=${text}`, '_blank');
-    setShowShareDialog(false);
-  };
-
-  const shareViaTelegram = () => {
-    if (!pdfBlobUrl) return;
-    downloadPDF();
-    const text = encodeURIComponent(`Attendance Report - ${departmentName}`);
-    window.open(`https://t.me/share/url?url=${text}`, '_blank');
-    setShowShareDialog(false);
-  };
-
-  const shareViaEmail = () => {
-    if (!pdfBlobUrl) return;
-    downloadPDF();
-    const subject = encodeURIComponent(`Attendance Report - ${departmentName}`);
-    const body = encodeURIComponent(`Please find the attendance report for ${departmentName} attached.\n\nGenerated on ${new Date().toLocaleDateString()}`);
-    window.open(`mailto:?subject=${subject}&body=${body}`, '_self');
-    setShowShareDialog(false);
-  };
-
-  const downloadPDF = () => {
-    if (!pdfBlobUrl) return;
-    const a = document.createElement('a');
-    a.href = pdfBlobUrl;
-    a.download = `attendance_${departmentName}.pdf`;
-    a.click();
-    toast.success('PDF downloaded');
+    // Fallback: download
+    doc.save(`attendance_${departmentName}.pdf`);
+    toast.success('PDF downloaded (sharing not supported on this device)');
   };
 
 
@@ -724,8 +684,8 @@ const generatePDF = (): jsPDF => {
                   <Button variant="outline" onClick={exportExcel}>
                   <Download className="w-4 h-4 mr-1" /> Excel
                   </Button>
-                  <Button onClick={preparePDFForShare}>
-                    <Share2 className="w-4 h-4 mr-1" /> Share PDF
+                  <Button onClick={sharePDF}>
+                    📄 Share PDF
                   </Button>
                   <Button onClick={saveAttendance} disabled={savingAttendance || students.length === 0}>
                     <Save className="w-4 h-4 mr-1" /> {savingAttendance ? 'Saving...' : 'Save Attendance'}
@@ -1020,61 +980,6 @@ const generatePDF = (): jsPDF => {
           </Card>
         )}
       </div>
-      {/* Share PDF Dialog */}
-      <Dialog open={showShareDialog} onOpenChange={(open) => {
-        setShowShareDialog(open);
-        if (!open && pdfBlobUrl) {
-          URL.revokeObjectURL(pdfBlobUrl);
-          setPdfBlobUrl(null);
-        }
-      }}>
-        <DialogContent className="max-w-sm">
-          <DialogHeader>
-            <DialogTitle>Share Attendance PDF</DialogTitle>
-          </DialogHeader>
-          <div className="grid grid-cols-2 gap-3 pt-2">
-            <Button
-              variant="outline"
-              className="flex flex-col items-center gap-2 h-auto py-4 border-green-500/30 hover:bg-green-500/10"
-              onClick={shareViaWhatsApp}
-            >
-              <MessageCircle className="w-6 h-6 text-green-500" />
-              <span className="text-xs">WhatsApp</span>
-            </Button>
-            <Button
-              variant="outline"
-              className="flex flex-col items-center gap-2 h-auto py-4 border-blue-500/30 hover:bg-blue-500/10"
-              onClick={shareViaTelegram}
-            >
-              <Send className="w-6 h-6 text-blue-500" />
-              <span className="text-xs">Telegram</span>
-            </Button>
-            <Button
-              variant="outline"
-              className="flex flex-col items-center gap-2 h-auto py-4 border-red-500/30 hover:bg-red-500/10"
-              onClick={shareViaEmail}
-            >
-              <Mail className="w-6 h-6 text-red-500" />
-              <span className="text-xs">Email</span>
-            </Button>
-            <Button
-              variant="outline"
-              className="flex flex-col items-center gap-2 h-auto py-4 border-purple-500/30 hover:bg-purple-500/10"
-              onClick={shareViaNative}
-            >
-              <Smartphone className="w-6 h-6 text-purple-500" />
-              <span className="text-xs">More Apps</span>
-            </Button>
-          </div>
-          <Button
-            variant="secondary"
-            className="w-full mt-2"
-            onClick={() => { downloadPDF(); setShowShareDialog(false); }}
-          >
-            <Download className="w-4 h-4 mr-2" /> Download PDF
-          </Button>
-        </DialogContent>
-      </Dialog>
     </DashboardLayout>
   );
 };
