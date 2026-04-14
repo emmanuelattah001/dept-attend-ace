@@ -57,7 +57,8 @@ const DeptAdminDashboard = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [filterPercent, setFilterPercent] = useState<string>('all');
   const [deletingHistory, setDeletingHistory] = useState(false);
-
+  const [showShareDialog, setShowShareDialog] = useState(false);
+  const [pdfBlobUrl, setPdfBlobUrl] = useState<string | null>(null);
   useEffect(() => {
     if (!profile?.department_id) return;
     Promise.all([fetchStudents(), fetchHistory(), fetchDepartmentName(), fetchAttendanceGrid()])
