@@ -1020,6 +1020,61 @@ const generatePDF = (): jsPDF => {
           </Card>
         )}
       </div>
+      {/* Share PDF Dialog */}
+      <Dialog open={showShareDialog} onOpenChange={(open) => {
+        setShowShareDialog(open);
+        if (!open && pdfBlobUrl) {
+          URL.revokeObjectURL(pdfBlobUrl);
+          setPdfBlobUrl(null);
+        }
+      }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Share Attendance PDF</DialogTitle>
+          </DialogHeader>
+          <div className="grid grid-cols-2 gap-3 pt-2">
+            <Button
+              variant="outline"
+              className="flex flex-col items-center gap-2 h-auto py-4 border-green-500/30 hover:bg-green-500/10"
+              onClick={shareViaWhatsApp}
+            >
+              <MessageCircle className="w-6 h-6 text-green-500" />
+              <span className="text-xs">WhatsApp</span>
+            </Button>
+            <Button
+              variant="outline"
+              className="flex flex-col items-center gap-2 h-auto py-4 border-blue-500/30 hover:bg-blue-500/10"
+              onClick={shareViaTelegram}
+            >
+              <Send className="w-6 h-6 text-blue-500" />
+              <span className="text-xs">Telegram</span>
+            </Button>
+            <Button
+              variant="outline"
+              className="flex flex-col items-center gap-2 h-auto py-4 border-red-500/30 hover:bg-red-500/10"
+              onClick={shareViaEmail}
+            >
+              <Mail className="w-6 h-6 text-red-500" />
+              <span className="text-xs">Email</span>
+            </Button>
+            <Button
+              variant="outline"
+              className="flex flex-col items-center gap-2 h-auto py-4 border-purple-500/30 hover:bg-purple-500/10"
+              onClick={shareViaNative}
+            >
+              <Smartphone className="w-6 h-6 text-purple-500" />
+              <span className="text-xs">More Apps</span>
+            </Button>
+          </div>
+          <Button
+            variant="secondary"
+            className="w-full mt-2"
+            onClick={() => { downloadPDF(); setShowShareDialog(false); }}
+          >
+            <Download className="w-4 h-4 mr-2" /> Download PDF
+          </Button>
+        </DialogContent>
+      </Dialog>
     </DashboardLayout>
   );
 };
