@@ -83,23 +83,40 @@ const DeptAdminDashboard = () => {
   };
 
   const fetchHistory = async () => {
-    const { data } = await (supabase as any)
-      .from('attendance')
-      .select(`
-          id,
-          student_ref,
-          date,
-          status,
-          students:student_ref (
-            name,
-            matric_no,
-            gender
-          )
-        `)
-      .eq('department_id', profile!.department_id!)
-      .order('date', { ascending: false })
-      .limit(200);
-    if (data) setHistory(data as AttendanceRecord[]);
+    // Fetch all records using pagination to avoid Supabase row limits
+    let allData: AttendanceRecord[] = [];
+    let from = 0;
+    const pageSize = 1000;
+    let hasMore = true;
+
+    while (hasMore) {
+      const { data } = await (supabase as any)
+        .from('attendance')
+        .select(`
+            id,
+            student_ref,
+            date,
+            status,
+            students:student_ref (
+              name,
+              matric_no,
+              gender
+            )
+          `)
+        .eq('department_id', profile!.department_id!)
+        .order('date', { ascending: false })
+        .range(from, from + pageSize - 1);
+
+      if (data && data.length > 0) {
+        allData = [...allData, ...(data as AttendanceRecord[])];
+        from += pageSize;
+        hasMore = data.length === pageSize;
+      } else {
+        hasMore = false;
+      }
+    }
+
+    setHistory(allData);
   };
 
   const addDateColumn = () => {
@@ -378,29 +395,39 @@ const generatePDF = (): jsPDF => {
 };
 
   const sharePDF = async () => {
-  const doc = generatePDF();
-
-  const pdfBlob = doc.output('blob');
-
-  const file = new File([pdfBlob], `attendance_${departmentName}.pdf`, {
-    type: 'application/pdf',
-  });
-
-  if (navigator.share && navigator.canShare?.({ files: [file] })) {
-    try {
-      await navigator.share({
-        title: 'Attendance Report',
-        text: `Attendance report for ${departmentName}`,
-        files: [file],
-      });
-    } catch (err) {
-      console.log(err);
+    if (history.length === 0) {
+      toast.error('No attendance history to share');
+      return;
     }
-  } else {
-    // fallback: download
+
+    const doc = generatePDF();
+    const pdfBlob = doc.output('blob');
+    const file = new File([pdfBlob], `attendance_${departmentName}.pdf`, {
+      type: 'application/pdf',
+    });
+
+    // Try native share first
+    if (navigator.share) {
+      try {
+        const canShare = navigator.canShare?.({ files: [file] });
+        if (canShare) {
+          await navigator.share({
+            title: 'Attendance Report',
+            text: `Attendance report for ${departmentName}`,
+            files: [file],
+          });
+          return;
+        }
+      } catch (err: any) {
+        if (err?.name === 'AbortError') return; // user cancelled
+        console.warn('Share failed, falling back to download', err);
+      }
+    }
+
+    // Fallback: download
     doc.save(`attendance_${departmentName}.pdf`);
-  }
-};
+    toast.success('PDF downloaded (sharing not supported on this device)');
+  };
 
 
   const updateStudentField = (id: string, field: string, value: string) => {
