@@ -37,7 +37,7 @@ const features = [
   {
     icon: ShieldCheck,
     title: 'Role-Based Access',
-    description: 'department admins, and students each get tailored dashboards and permissions.',
+    description: 'Department admins(course rep), and students each get tailored dashboards and permissions.',
   },
 ];
 
@@ -66,7 +66,7 @@ const LandingPage = () => {
                 <Search className="w-5 h-5 mr-2" /> Check My Attendance
               </Button>
               <Button onClick={() => navigate('/login')} variant="outline" size="lg" className="text-base">
-                <LogIn className="w-5 h-5 mr-2" /> Admin Login
+                <LogIn className="w-5 h-5 mr-2" /> Course Rep's
               </Button>
             </div>
           </div>
