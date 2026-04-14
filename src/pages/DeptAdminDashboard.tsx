@@ -373,7 +373,7 @@ const generatePDF = (): jsPDF => {
     doc.saveGraphicsState();
     doc.setFontSize(60);
     doc.setTextColor(200, 200, 200);
-    doc.setGState(new (doc as any).GState({ opacity: 0.15 }));
+    doc.setGState(new (doc as any).GState({ opacity: 0.25 }));
     doc.text('Attendtrack', pageWidth / 2, pageHeight / 2, {
       align: 'center',
       angle: 45,
