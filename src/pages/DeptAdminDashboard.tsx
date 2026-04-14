@@ -724,8 +724,8 @@ const generatePDF = (): jsPDF => {
                   <Button variant="outline" onClick={exportExcel}>
                   <Download className="w-4 h-4 mr-1" /> Excel
                   </Button>
-                  <Button onClick={sharePDF}>
-                    📄 Share PDF
+                  <Button onClick={preparePDFForShare}>
+                    <Share2 className="w-4 h-4 mr-1" /> Share PDF
                   </Button>
                   <Button onClick={saveAttendance} disabled={savingAttendance || students.length === 0}>
                     <Save className="w-4 h-4 mr-1" /> {savingAttendance ? 'Saving...' : 'Save Attendance'}
