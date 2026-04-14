@@ -83,23 +83,40 @@ const DeptAdminDashboard = () => {
   };
 
   const fetchHistory = async () => {
-    const { data } = await (supabase as any)
-      .from('attendance')
-      .select(`
-          id,
-          student_ref,
-          date,
-          status,
-          students:student_ref (
-            name,
-            matric_no,
-            gender
-          )
-        `)
-      .eq('department_id', profile!.department_id!)
-      .order('date', { ascending: false })
-      .limit(200);
-    if (data) setHistory(data as AttendanceRecord[]);
+    // Fetch all records using pagination to avoid Supabase row limits
+    let allData: AttendanceRecord[] = [];
+    let from = 0;
+    const pageSize = 1000;
+    let hasMore = true;
+
+    while (hasMore) {
+      const { data } = await (supabase as any)
+        .from('attendance')
+        .select(`
+            id,
+            student_ref,
+            date,
+            status,
+            students:student_ref (
+              name,
+              matric_no,
+              gender
+            )
+          `)
+        .eq('department_id', profile!.department_id!)
+        .order('date', { ascending: false })
+        .range(from, from + pageSize - 1);
+
+      if (data && data.length > 0) {
+        allData = [...allData, ...(data as AttendanceRecord[])];
+        from += pageSize;
+        hasMore = data.length === pageSize;
+      } else {
+        hasMore = false;
+      }
+    }
+
+    setHistory(allData);
   };
 
   const addDateColumn = () => {
