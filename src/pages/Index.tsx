@@ -37,7 +37,7 @@ const features = [
   {
     icon: ShieldCheck,
     title: 'Role-Based Access',
-    description: ' department admins, and students each get tailored dashboards and permissions.',
+    description: 'department admins, and students each get tailored dashboards and permissions.',
   },
 ];
 
