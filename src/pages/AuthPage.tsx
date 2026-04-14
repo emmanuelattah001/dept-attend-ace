@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { toast } from 'sonner';
-import { ClipboardCheck } from 'lucide-react';
+import { ClipboardCheck, ArrowLeft } from 'lucide-react';
 
 const AuthPage = () => {
   const navigate = useNavigate();
