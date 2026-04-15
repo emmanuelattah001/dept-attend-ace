@@ -21,7 +21,7 @@ const CheckAttendance = () => {
   const [searched, setSearched] = useState(false);
   const [loading, setLoading] = useState(false);
 
-  const handleSearch = async () => {
+ const handleSearch = async () => {
   const trimmed = matricNo.trim();
 
   if (!trimmed) {
@@ -32,38 +32,35 @@ const CheckAttendance = () => {
   setLoading(true);
   setSearched(true);
 
-  try {
-    const { data, error } = await supabase.rpc('get_attendance_by_matric', {
-      _matric_no: trimmed,
-    });
+  const { data, error } = await supabase
+  .from('students')
+  .select(`
+    name,
+    matric_no,
+    attendance (
+      date,
+      status
+    )
+  `)
+  .ilike('matric_no', trimmed);
 
-    console.log("DATA:", data);
-    console.log("ERROR:", error);
+  console.log("DATA:", data);
+  console.log("ERROR:", error);
 
-    if (error) {
-      toast.error(error.message || 'Failed to fetch attendance');
-      setRecords([]);
-      return;
-    }
-
-    // Normalize status to avoid case issues
-    const formatted = (data || []).map((item: any) => ({
-      ...item,
-      status: item.status?.toLowerCase(),
-    }));
-
-    setRecords(formatted);
-
-    if (!data || data.length === 0) {
-      toast.info('No records found');
-    }
-
-  } catch (err) {
-    console.error(err);
-    toast.error('Something went wrong');
-  } finally {
-    setLoading(false);
+  if (error) {
+    toast.error(error.message);
+    setRecords([]);
+  } else {
+    setRecords(
+      (data || []).map((r: any) => ({
+        attendance_date: r.date,
+        status: r.status,
+        department_name: ''
+      }))
+    );
   }
+
+  setLoading(false);
 };
 
   const present = records.filter(r => r.status?.toLowerCase() === 'present').length;
