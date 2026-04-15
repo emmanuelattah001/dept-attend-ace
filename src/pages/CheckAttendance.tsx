@@ -22,34 +22,52 @@ const CheckAttendance = () => {
   const [loading, setLoading] = useState(false);
 
   const handleSearch = async () => {
-    const trimmed = matricNo.trim();
-    if (!trimmed) {
-      toast.error('Please enter your matric number');
-      return;
-    }
-    if (trimmed.length > 30) {
-      toast.error('Invalid matric number');
-      return;
-    }
+  const trimmed = matricNo.trim();
 
-    setLoading(true);
-    setSearched(true);
+  if (!trimmed) {
+    toast.error('Please enter your matric number');
+    return;
+  }
 
-    const { data, error } = await (supabase as any).rpc('get_attendance_by_matric', {
+  setLoading(true);
+  setSearched(true);
+
+  try {
+    const { data, error } = await supabase.rpc('get_attendance_by_matric', {
       _matric_no: trimmed,
     });
 
-    if (error) {
-      toast.error('Failed to fetch attendance');
-      setRecords([]);
-    } else {
-      setRecords(data || []);
-    }
-    setLoading(false);
-  };
+    console.log("DATA:", data);
+    console.log("ERROR:", error);
 
-  const present = records.filter(r => r.status === 'present').length;
-  const absent = records.filter(r => r.status === 'absent').length;
+    if (error) {
+      toast.error(error.message || 'Failed to fetch attendance');
+      setRecords([]);
+      return;
+    }
+
+    // Normalize status to avoid case issues
+    const formatted = (data || []).map((item: any) => ({
+      ...item,
+      status: item.status?.toLowerCase(),
+    }));
+
+    setRecords(formatted);
+
+    if (!data || data.length === 0) {
+      toast.info('No records found');
+    }
+
+  } catch (err) {
+    console.error(err);
+    toast.error('Something went wrong');
+  } finally {
+    setLoading(false);
+  }
+};
+
+  const present = records.filter(r => r.status?.toLowerCase() === 'present').length;
+  const absent = records.filter(r => r.status?.toLowerCase() === 'absent').length;
   const total = present + absent;
   const percentage = total > 0 ? Math.round((present / total) * 100) : 0;
 
