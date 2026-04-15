@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
 import { Button } from '@/components/ui/button';
@@ -8,7 +8,7 @@ import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { toast } from 'sonner';
-import { CalendarCheck, Download, History, Users, Plus, Upload, Save, Trash2, Share2, Check, X, CheckCheck, XCircle } from 'lucide-react';
+import { CalendarCheck, Download, History, Users, Plus, Upload, Save, Trash2, Share2, Check, X, CheckCheck, XCircle, Search, AlertTriangle } from 'lucide-react';
 import DashboardLayout from '@/components/DashboardLayout';
 import LoadingScreen from '@/components/LoadingScreen';
 import * as XLSX from "xlsx";
@@ -54,6 +54,9 @@ const DeptAdminDashboard = () => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [importing, setImporting] = useState(false);
   const [initialLoading, setInitialLoading] = useState(true);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [filterPercent, setFilterPercent] = useState<string>('all');
+  const [deletingHistory, setDeletingHistory] = useState(false);
 
   useEffect(() => {
     if (!profile?.department_id) return;
@@ -80,23 +83,40 @@ const DeptAdminDashboard = () => {
   };
 
   const fetchHistory = async () => {
-    const { data } = await (supabase as any)
-      .from('attendance')
-      .select(`
-          id,
-          student_ref,
-          date,
-          status,
-          students:student_ref (
-            name,
-            matric_no,
-            gender
-          )
-        `)
-      .eq('department_id', profile!.department_id!)
-      .order('date', { ascending: false })
-      .limit(200);
-    if (data) setHistory(data as AttendanceRecord[]);
+    // Fetch all records using pagination to avoid Supabase row limits
+    let allData: AttendanceRecord[] = [];
+    let from = 0;
+    const pageSize = 1000;
+    let hasMore = true;
+
+    while (hasMore) {
+      const { data } = await (supabase as any)
+        .from('attendance')
+        .select(`
+            id,
+            student_ref,
+            date,
+            status,
+            students:student_ref (
+              name,
+              matric_no,
+              gender
+            )
+          `)
+        .eq('department_id', profile!.department_id!)
+        .order('date', { ascending: false })
+        .range(from, from + pageSize - 1);
+
+      if (data && data.length > 0) {
+        allData = [...allData, ...(data as AttendanceRecord[])];
+        from += pageSize;
+        hasMore = data.length === pageSize;
+      } else {
+        hasMore = false;
+      }
+    }
+
+    setHistory(allData);
   };
 
   const addDateColumn = () => {
@@ -341,12 +361,28 @@ const generatePDF = (): jsPDF => {
     },
   });
 
-  // 📄 FOOTER
+  // 📄 FOOTER + WATERMARK
   const pageCount = doc.getNumberOfPages();
+  const pageWidth = doc.internal.pageSize.getWidth();
+  const pageHeight = doc.internal.pageSize.getHeight();
 
   for (let i = 1; i <= pageCount; i++) {
     doc.setPage(i);
+
+    // Watermark
+    doc.saveGraphicsState();
+    doc.setFontSize(60);
+    doc.setTextColor(200, 200, 200);
+    doc.setGState(new (doc as any).GState({ opacity: 0.25 }));
+    doc.text('Attendtrack', pageWidth / 2, pageHeight / 2, {
+      align: 'center',
+      angle: 45,
+    });
+    doc.restoreGraphicsState();
+
+    // Page number
     doc.setFontSize(10);
+    doc.setTextColor(0, 0, 0);
     doc.text(
       `Page ${i} of ${pageCount}`,
       105,
@@ -359,29 +395,39 @@ const generatePDF = (): jsPDF => {
 };
 
   const sharePDF = async () => {
-  const doc = generatePDF();
-
-  const pdfBlob = doc.output('blob');
-
-  const file = new File([pdfBlob], `attendance_${departmentName}.pdf`, {
-    type: 'application/pdf',
-  });
-
-  if (navigator.share && navigator.canShare?.({ files: [file] })) {
-    try {
-      await navigator.share({
-        title: 'Attendance Report',
-        text: `Attendance report for ${departmentName}`,
-        files: [file],
-      });
-    } catch (err) {
-      console.log(err);
+    if (history.length === 0) {
+      toast.error('No attendance history to share');
+      return;
     }
-  } else {
-    // fallback: download
+
+    const doc = generatePDF();
+    const pdfBlob = doc.output('blob');
+    const file = new File([pdfBlob], `attendance_${departmentName}.pdf`, {
+      type: 'application/pdf',
+    });
+
+    // Try native share first
+    if (navigator.share) {
+      try {
+        const canShare = navigator.canShare?.({ files: [file] });
+        if (canShare) {
+          await navigator.share({
+            title: 'Attendance Report',
+            text: `Attendance report for ${departmentName}`,
+            files: [file],
+          });
+          return;
+        }
+      } catch (err: any) {
+        if (err?.name === 'AbortError') return; // user cancelled
+        console.warn('Share failed, falling back to download', err);
+      }
+    }
+
+    // Fallback: download
     doc.save(`attendance_${departmentName}.pdf`);
-  }
-};
+    toast.success('PDF downloaded (sharing not supported on this device)');
+  };
 
 
   const updateStudentField = (id: string, field: string, value: string) => {
@@ -510,6 +556,56 @@ const generatePDF = (): jsPDF => {
     if (fileInputRef.current) fileInputRef.current.value = '';
     setImporting(false);
   };
+
+  const deleteAllHistory = async () => {
+    if (!confirm('Are you sure you want to delete ALL attendance history? This cannot be undone.')) return;
+    if (!profile?.department_id) return;
+    setDeletingHistory(true);
+    const { error } = await (supabase as any)
+      .from('attendance')
+      .delete()
+      .eq('department_id', profile.department_id);
+    if (error) {
+      toast.error(error.message);
+    } else {
+      toast.success('All attendance history deleted');
+      setHistory([]);
+      setGrid({});
+    }
+    setDeletingHistory(false);
+  };
+
+  // Compute attendance percentages per student
+  const studentStats = useMemo(() => {
+    const month = new Date().toISOString().slice(0, 7);
+    return students.map(student => {
+      const records = history.filter(
+        r => r.student_ref === student.id && r.date.startsWith(month)
+      );
+      const total = records.length;
+      const present = records.filter(r => r.status === 'present').length;
+      const percent = total ? (present / total) * 100 : 0;
+      return { ...student, present, total, percent };
+    });
+  }, [students, history]);
+
+  // Filtered students for history tab
+  const filteredStats = useMemo(() => {
+    let result = studentStats;
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase();
+      result = result.filter(s =>
+        s.name.toLowerCase().includes(q) ||
+        (s.matric_no && s.matric_no.toLowerCase().includes(q))
+      );
+    }
+    if (filterPercent === 'below75') {
+      result = result.filter(s => s.percent < 75);
+    } else if (filterPercent === 'above75') {
+      result = result.filter(s => s.percent >= 75);
+    }
+    return result;
+  }, [studentStats, searchQuery, filterPercent]);
 
   if (!profile?.department_id) {
     return (
@@ -782,44 +878,60 @@ const generatePDF = (): jsPDF => {
 
         {activeTab === 'history' && (
           <Card>
-            <CardHeader><CardTitle className="text-lg">Attendance History</CardTitle></CardHeader>
+            <CardHeader>
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                <CardTitle className="text-lg">Attendance History</CardTitle>
+                <Button
+                  variant="destructive"
+                  size="sm"
+                  onClick={deleteAllHistory}
+                  disabled={deletingHistory || history.length === 0}
+                >
+                  <Trash2 className="w-4 h-4 mr-1" /> {deletingHistory ? 'Deleting...' : 'Delete All History'}
+                </Button>
+              </div>
+              <div className="flex flex-col sm:flex-row gap-2 mt-3">
+                <div className="relative flex-1">
+                  <Search className="absolute left-2.5 top-2.5 w-4 h-4 text-muted-foreground" />
+                  <Input
+                    placeholder="Search by name or matric no..."
+                    value={searchQuery}
+                    onChange={e => setSearchQuery(e.target.value)}
+                    className="pl-8"
+                  />
+                </div>
+                <Select value={filterPercent} onValueChange={setFilterPercent}>
+                  <SelectTrigger className="w-[180px]">
+                    <SelectValue placeholder="Filter by %" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Students</SelectItem>
+                    <SelectItem value="below75">Below 75%</SelectItem>
+                    <SelectItem value="above75">75% and above</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </CardHeader>
             <CardContent>
               <div className="mb-4 grid grid-cols-2 md:grid-cols-3 gap-3">
-                  {students.map(student => {
-                    const month = new Date().toISOString().slice(0, 7);
-
-                    const records = history.filter(
-                      r => r.student_ref === student.id && r.date.startsWith(month)
-                    );
-
-                    const total = records.length;
-                    const present = records.filter(r => r.status === 'present').length;
-                    const percent = total ? ((present / total) * 100).toFixed(1) : '0.0';
-
-                    return (
-                      <div
-                        key={student.id}
-                        className="p-3 rounded-lg border bg-muted/30"
-                      >
-                        <p className="font-medium text-sm">{student.name}</p>
-
-                        <p className="text-xs text-muted-foreground">
-                          Present: {present} / {total}
-                        </p>
-
-                        <p
-                          className={`text-sm font-bold ${
-                            Number(percent) >= 75
-                              ? 'text-green-600'
-                              : 'text-red-500'
-                          }`}
-                        >
-                          {percent}%
-                        </p>
-                      </div>
-                    );
-                  })}
-                </div>
+                {filteredStats.map(student => (
+                  <div key={student.id} className="p-3 rounded-lg border bg-muted/30">
+                    <p className="font-medium text-sm">{student.name}</p>
+                    {student.matric_no && (
+                      <p className="text-xs text-muted-foreground">{student.matric_no}</p>
+                    )}
+                    <p className="text-xs text-muted-foreground">
+                      Present: {student.present} / {student.total}
+                    </p>
+                    <p className={`text-sm font-bold ${student.percent >= 75 ? 'text-green-600' : 'text-red-500'}`}>
+                      {student.percent.toFixed(1)}%
+                    </p>
+                  </div>
+                ))}
+                {filteredStats.length === 0 && (
+                  <p className="text-muted-foreground text-sm col-span-full text-center py-4">No students match your search/filter.</p>
+                )}
+              </div>
               <div className="overflow-x-auto">
                 <Table>
                   <TableHeader>
@@ -833,7 +945,16 @@ const generatePDF = (): jsPDF => {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {history.map((r, idx) => (
+                    {history
+                      .filter(r => {
+                        if (!searchQuery.trim()) return true;
+                        const q = searchQuery.toLowerCase();
+                        return (
+                          (r.students?.name?.toLowerCase().includes(q)) ||
+                          (r.students?.matric_no?.toLowerCase().includes(q))
+                        );
+                      })
+                      .map((r, idx) => (
                       <TableRow key={r.id}>
                         <TableCell className="text-center font-medium">{idx + 1}</TableCell>
                         <TableCell>{r.students?.name ?? 'Unknown'}</TableCell>
@@ -849,7 +970,7 @@ const generatePDF = (): jsPDF => {
                     ))}
                     {history.length === 0 && (
                       <TableRow>
-                        <TableCell colSpan={3} className="text-center text-muted-foreground">No records yet</TableCell>
+                        <TableCell colSpan={6} className="text-center text-muted-foreground">No records yet</TableCell>
                       </TableRow>
                     )}
                   </TableBody>
