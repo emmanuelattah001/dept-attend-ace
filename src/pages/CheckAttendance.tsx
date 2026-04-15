@@ -32,17 +32,27 @@ const CheckAttendance = () => {
   setLoading(true);
   setSearched(true);
 
+  // 1. Get student first
+  const { data: student, error: studentError } = await supabase
+    .from('students')
+    .select('id, matric_no, name')
+    .ilike('matric_no', trimmed)
+    .single();
+
+  if (studentError || !student) {
+    console.log("STUDENT ERROR:", studentError);
+    toast.error("Student not found");
+    setRecords([]);
+    setLoading(false);
+    return;
+  }
+
+  // 2. Get attendance using student id
   const { data, error } = await supabase
-  .from('students')
-  .select(`
-    name,
-    matric_no,
-    attendance (
-      date,
-      status
-    )
-  `)
-  .ilike('matric_no', trimmed);
+    .from('attendance')
+    .select('date, status, department_id')
+    .eq('student_ref', student.id)
+    .order('date', { ascending: false });
 
   console.log("DATA:", data);
   console.log("ERROR:", error);
