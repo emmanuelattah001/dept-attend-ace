@@ -39,6 +39,7 @@ const DeptAdminDashboard = () => {
   const { profile, user } = useAuth();
   const [students, setStudents] = useState<Student[]>([]);
   const [departmentName, setDepartmentName] = useState<string>('');
+  const [defaultCourseId, setDefaultCourseId] = useState<string | null>(null);
   const [dateColumns, setDateColumns] = useState<string[]>([new Date().toISOString().split('T')[0]]);
   const [grid, setGrid] = useState<Record<string, Record<string, 'P' | 'A' | ''>>>({});
   const [history, setHistory] = useState<AttendanceRecord[]>([]);
