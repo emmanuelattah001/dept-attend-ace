@@ -39,6 +39,7 @@ const DeptAdminDashboard = () => {
   const { profile, user } = useAuth();
   const [students, setStudents] = useState<Student[]>([]);
   const [departmentName, setDepartmentName] = useState<string>('');
+  const [defaultCourseId, setDefaultCourseId] = useState<string | null>(null);
   const [dateColumns, setDateColumns] = useState<string[]>([new Date().toISOString().split('T')[0]]);
   const [grid, setGrid] = useState<Record<string, Record<string, 'P' | 'A' | ''>>>({});
   const [history, setHistory] = useState<AttendanceRecord[]>([]);
@@ -60,9 +61,42 @@ const DeptAdminDashboard = () => {
 
   useEffect(() => {
     if (!profile?.department_id) return;
-    Promise.all([fetchStudents(), fetchHistory(), fetchDepartmentName(), fetchAttendanceGrid()])
+    Promise.all([fetchStudents(), fetchHistory(), fetchDepartmentName(), fetchAttendanceGrid(), fetchDefaultCourse()])
       .finally(() => setInitialLoading(false));
   }, [profile?.department_id]);
+
+  const fetchDefaultCourse = async () => {
+    if (!profile?.department_id) return;
+    // Try to find existing General Attendance course for this dept
+    const { data } = await (supabase as any)
+      .from('courses')
+      .select('id')
+      .eq('department_id', profile.department_id)
+      .eq('code', 'GEN001')
+      .maybeSingle();
+    if (data?.id) {
+      setDefaultCourseId(data.id);
+      return;
+    }
+    // Fallback: any course in this dept
+    const { data: any2 } = await (supabase as any)
+      .from('courses')
+      .select('id')
+      .eq('department_id', profile.department_id)
+      .limit(1)
+      .maybeSingle();
+    if (any2?.id) {
+      setDefaultCourseId(any2.id);
+      return;
+    }
+    // Last resort: create one
+    const { data: created, error } = await (supabase as any)
+      .from('courses')
+      .insert({ code: 'GEN001', name: 'General Attendance', department_id: profile.department_id })
+      .select('id')
+      .single();
+    if (!error && created?.id) setDefaultCourseId(created.id);
+  };
 
   const fetchDepartmentName = async () => {
     const { data } = await supabase
@@ -172,7 +206,23 @@ const DeptAdminDashboard = () => {
   };
 
   const saveAttendance = async () => {
-    if (!profile?.department_id || !user?.id) return;
+    if (!profile?.department_id || !user?.id) {
+      toast.error('Not signed in', { description: 'Please refresh and log in again.' });
+      return;
+    }
+
+    // Ensure we have a course_id (NOT NULL in DB)
+    let courseId = defaultCourseId;
+    if (!courseId) {
+      await fetchDefaultCourse();
+      courseId = defaultCourseId;
+    }
+    if (!courseId) {
+      toast.error('Could not load department course', {
+        description: 'Please reload the page and try again.',
+      });
+      return;
+    }
 
     const rows: any[] = [];
     for (const student of students) {
@@ -181,6 +231,7 @@ const DeptAdminDashboard = () => {
         if (val === 'P' || val === 'A') {
           rows.push({
             student_ref: student.id,
+            course_id: courseId,
             department_id: profile.department_id,
             marked_by: user.id,
             date,
@@ -196,19 +247,41 @@ const DeptAdminDashboard = () => {
     }
 
     setSavingAttendance(true);
-    const { error } = await (supabase as any)
-    .from('attendance')
-    .upsert(rows, {
-    onConflict: 'student_ref,date'
-  });
-    if (error) {
-      toast.error(error.message);
-    } else {
-      toast.success(`Saved ${rows.length} attendance records`);
-      await fetchAttendanceGrid();
-      fetchHistory();
+    const toastId = toast.loading(`Saving ${rows.length} records...`);
+    try {
+      // Chunk in parallel for speed on large attendance batches
+      const CHUNK = 500;
+      const chunks: any[][] = [];
+      for (let i = 0; i < rows.length; i += CHUNK) chunks.push(rows.slice(i, i + CHUNK));
+
+      const results = await Promise.all(
+        chunks.map(chunk =>
+          (supabase as any)
+            .from('attendance')
+            .upsert(chunk, { onConflict: 'student_ref,course_id,date' })
+        )
+      );
+
+      const failed = results.find(r => r.error);
+      if (failed?.error) {
+        console.error('Save attendance error:', failed.error);
+        toast.error('Failed to save attendance', {
+          id: toastId,
+          description: failed.error.message || 'Please try again.',
+        });
+      } else {
+        toast.success(`Saved ${rows.length} attendance records`, { id: toastId });
+        await Promise.all([fetchAttendanceGrid(), fetchHistory()]);
+      }
+    } catch (err: any) {
+      console.error('Unexpected save error:', err);
+      toast.error('Failed to save attendance', {
+        id: toastId,
+        description: err?.message || 'Network error. Please try again.',
+      });
+    } finally {
+      setSavingAttendance(false);
     }
-    setSavingAttendance(false);
   };
 
   const fetchAttendanceGrid = async () => {
