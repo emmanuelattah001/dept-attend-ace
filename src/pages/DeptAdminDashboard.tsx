@@ -61,9 +61,42 @@ const DeptAdminDashboard = () => {
 
   useEffect(() => {
     if (!profile?.department_id) return;
-    Promise.all([fetchStudents(), fetchHistory(), fetchDepartmentName(), fetchAttendanceGrid()])
+    Promise.all([fetchStudents(), fetchHistory(), fetchDepartmentName(), fetchAttendanceGrid(), fetchDefaultCourse()])
       .finally(() => setInitialLoading(false));
   }, [profile?.department_id]);
+
+  const fetchDefaultCourse = async () => {
+    if (!profile?.department_id) return;
+    // Try to find existing General Attendance course for this dept
+    const { data } = await (supabase as any)
+      .from('courses')
+      .select('id')
+      .eq('department_id', profile.department_id)
+      .eq('code', 'GEN001')
+      .maybeSingle();
+    if (data?.id) {
+      setDefaultCourseId(data.id);
+      return;
+    }
+    // Fallback: any course in this dept
+    const { data: any2 } = await (supabase as any)
+      .from('courses')
+      .select('id')
+      .eq('department_id', profile.department_id)
+      .limit(1)
+      .maybeSingle();
+    if (any2?.id) {
+      setDefaultCourseId(any2.id);
+      return;
+    }
+    // Last resort: create one
+    const { data: created, error } = await (supabase as any)
+      .from('courses')
+      .insert({ code: 'GEN001', name: 'General Attendance', department_id: profile.department_id })
+      .select('id')
+      .single();
+    if (!error && created?.id) setDefaultCourseId(created.id);
+  };
 
   const fetchDepartmentName = async () => {
     const { data } = await supabase
