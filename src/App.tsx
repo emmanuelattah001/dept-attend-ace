@@ -15,24 +15,49 @@ import CheckAttendance from "./pages/CheckAttendance.tsx";
 
 const queryClient = new QueryClient();
 
+const GlobalErrorListeners = () => {
+  useEffect(() => {
+    const onUnhandled = (e: PromiseRejectionEvent) => {
+      console.error('Unhandled promise rejection:', e.reason);
+      const msg = (e.reason?.message || String(e.reason || '')).slice(0, 200);
+      if (msg && !msg.includes('AbortError')) {
+        toast.error('Something went wrong', { description: msg });
+      }
+    };
+    const onError = (e: ErrorEvent) => {
+      console.error('Global error:', e.error || e.message);
+    };
+    window.addEventListener('unhandledrejection', onUnhandled);
+    window.addEventListener('error', onError);
+    return () => {
+      window.removeEventListener('unhandledrejection', onUnhandled);
+      window.removeEventListener('error', onError);
+    };
+  }, []);
+  return null;
+};
+
 const App = () => (
-  <QueryClientProvider client={queryClient}>
-    <AuthProvider>
-      <TooltipProvider>
-        <Toaster />
-        <Sonner />
-        <BrowserRouter>
-          <Routes>
-            <Route path="/" element={<Index />} />
-            <Route path="/login" element={<AuthPage />} />
-            <Route path="/install" element={<InstallPage />} />
-            <Route path="/check-attendance" element={<CheckAttendance />} />
-            <Route path="*" element={<NotFound />} />
-          </Routes>
-        </BrowserRouter>
-      </TooltipProvider>
-    </AuthProvider>
-  </QueryClientProvider>
+  <ErrorBoundary>
+    <QueryClientProvider client={queryClient}>
+      <AuthProvider>
+        <TooltipProvider>
+          <Toaster />
+          <Sonner />
+          <GlobalErrorListeners />
+          <BrowserRouter>
+            <Routes>
+              <Route path="/" element={<Index />} />
+              <Route path="/login" element={<AuthPage />} />
+              <Route path="/install" element={<InstallPage />} />
+              <Route path="/check-attendance" element={<CheckAttendance />} />
+              <Route path="*" element={<NotFound />} />
+            </Routes>
+          </BrowserRouter>
+        </TooltipProvider>
+      </AuthProvider>
+    </QueryClientProvider>
+  </ErrorBoundary>
 );
 
 export default App;
