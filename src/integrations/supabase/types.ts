@@ -16,6 +16,7 @@ export type Database = {
     Tables: {
       attendance: {
         Row: {
+          course_id: string
           created_at: string
           date: string
           department_id: string
@@ -26,6 +27,7 @@ export type Database = {
           student_ref: string | null
         }
         Insert: {
+          course_id: string
           created_at?: string
           date?: string
           department_id: string
@@ -36,6 +38,7 @@ export type Database = {
           student_ref?: string | null
         }
         Update: {
+          course_id?: string
           created_at?: string
           date?: string
           department_id?: string
@@ -46,6 +49,13 @@ export type Database = {
           student_ref?: string | null
         }
         Relationships: [
+          {
+            foreignKeyName: "attendance_course_id_fkey"
+            columns: ["course_id"]
+            isOneToOne: false
+            referencedRelation: "courses"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "attendance_department_id_fkey"
             columns: ["department_id"]
@@ -72,6 +82,38 @@ export type Database = {
             columns: ["student_ref"]
             isOneToOne: false
             referencedRelation: "students"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      courses: {
+        Row: {
+          code: string
+          created_at: string | null
+          department_id: string | null
+          id: string
+          name: string
+        }
+        Insert: {
+          code: string
+          created_at?: string | null
+          department_id?: string | null
+          id?: string
+          name: string
+        }
+        Update: {
+          code?: string
+          created_at?: string | null
+          department_id?: string | null
+          id?: string
+          name?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "courses_department_id_fkey"
+            columns: ["department_id"]
+            isOneToOne: false
+            referencedRelation: "departments"
             referencedColumns: ["id"]
           },
         ]
