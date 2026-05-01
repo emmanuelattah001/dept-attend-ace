@@ -206,7 +206,23 @@ const DeptAdminDashboard = () => {
   };
 
   const saveAttendance = async () => {
-    if (!profile?.department_id || !user?.id) return;
+    if (!profile?.department_id || !user?.id) {
+      toast.error('Not signed in', { description: 'Please refresh and log in again.' });
+      return;
+    }
+
+    // Ensure we have a course_id (NOT NULL in DB)
+    let courseId = defaultCourseId;
+    if (!courseId) {
+      await fetchDefaultCourse();
+      courseId = defaultCourseId;
+    }
+    if (!courseId) {
+      toast.error('Could not load department course', {
+        description: 'Please reload the page and try again.',
+      });
+      return;
+    }
 
     const rows: any[] = [];
     for (const student of students) {
@@ -215,6 +231,7 @@ const DeptAdminDashboard = () => {
         if (val === 'P' || val === 'A') {
           rows.push({
             student_ref: student.id,
+            course_id: courseId,
             department_id: profile.department_id,
             marked_by: user.id,
             date,
@@ -230,19 +247,41 @@ const DeptAdminDashboard = () => {
     }
 
     setSavingAttendance(true);
-    const { error } = await (supabase as any)
-    .from('attendance')
-    .upsert(rows, {
-    onConflict: 'student_ref,date'
-  });
-    if (error) {
-      toast.error(error.message);
-    } else {
-      toast.success(`Saved ${rows.length} attendance records`);
-      await fetchAttendanceGrid();
-      fetchHistory();
+    const toastId = toast.loading(`Saving ${rows.length} records...`);
+    try {
+      // Chunk in parallel for speed on large attendance batches
+      const CHUNK = 500;
+      const chunks: any[][] = [];
+      for (let i = 0; i < rows.length; i += CHUNK) chunks.push(rows.slice(i, i + CHUNK));
+
+      const results = await Promise.all(
+        chunks.map(chunk =>
+          (supabase as any)
+            .from('attendance')
+            .upsert(chunk, { onConflict: 'student_ref,course_id,date' })
+        )
+      );
+
+      const failed = results.find(r => r.error);
+      if (failed?.error) {
+        console.error('Save attendance error:', failed.error);
+        toast.error('Failed to save attendance', {
+          id: toastId,
+          description: failed.error.message || 'Please try again.',
+        });
+      } else {
+        toast.success(`Saved ${rows.length} attendance records`, { id: toastId });
+        await Promise.all([fetchAttendanceGrid(), fetchHistory()]);
+      }
+    } catch (err: any) {
+      console.error('Unexpected save error:', err);
+      toast.error('Failed to save attendance', {
+        id: toastId,
+        description: err?.message || 'Network error. Please try again.',
+      });
+    } finally {
+      setSavingAttendance(false);
     }
-    setSavingAttendance(false);
   };
 
   const fetchAttendanceGrid = async () => {
