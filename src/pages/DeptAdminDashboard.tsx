@@ -66,9 +66,51 @@ const DeptAdminDashboard = () => {
 
   useEffect(() => {
     if (!profile?.department_id) return;
-    Promise.all([fetchStudents(), fetchHistory(), fetchDepartmentName(), fetchAttendanceGrid(), fetchDefaultCourse()])
+    Promise.all([fetchStudents(), fetchHistory(), fetchDepartmentName(), fetchCourses(), fetchDefaultCourse()])
       .finally(() => setInitialLoading(false));
   }, [profile?.department_id]);
+
+  useEffect(() => {
+    if (selectedCourseId) fetchAttendanceGrid();
+  }, [selectedCourseId]);
+
+  const fetchCourses = async () => {
+    if (!profile?.department_id) return;
+    const { data } = await (supabase as any)
+      .from('courses')
+      .select('id, code, name')
+      .eq('department_id', profile.department_id)
+      .order('code');
+    if (data) setCourses(data);
+  };
+
+  const addCourse = async () => {
+    if (!newCourse.code.trim() || !newCourse.name.trim()) {
+      toast.error('Code and name are required');
+      return;
+    }
+    if (!profile?.department_id) return;
+    setAddingCourse(true);
+    const { data, error } = await (supabase as any)
+      .from('courses')
+      .insert({
+        code: newCourse.code.trim(),
+        name: newCourse.name.trim(),
+        department_id: profile.department_id,
+      })
+      .select('id, code, name')
+      .single();
+    if (error) {
+      toast.error(error.message);
+    } else {
+      toast.success('Course added');
+      setCourses(prev => [...prev, data].sort((a, b) => a.code.localeCompare(b.code)));
+      setSelectedCourseId(data.id);
+      setNewCourse({ code: '', name: '' });
+      setShowAddCourseDialog(false);
+    }
+    setAddingCourse(false);
+  };
 
   const fetchDefaultCourse = async () => {
     if (!profile?.department_id) return;
