@@ -808,8 +808,42 @@ const generatePDF = (): jsPDF => {
                   </Button>
                 </div>
               </div>
-              <p className="text-xs text-muted-foreground mt-1">Click a cell to toggle: empty → <Check className="inline w-3 h-3 text-green-600" /> (Present) → <X className="inline w-3 h-3 text-red-600" /> (Absent) → empty</p>
-              <p className="text-xs text-muted-foreground">Use bulk buttons below each date to mark all students at once.</p>
+              <div className="flex items-center gap-2 mt-3 flex-wrap">
+                <span className="text-sm font-medium">Course:</span>
+                <Select value={selectedCourseId} onValueChange={setSelectedCourseId}>
+                  <SelectTrigger className="w-[260px] h-9">
+                    <SelectValue placeholder="Select a course" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {courses.map(c => (
+                      <SelectItem key={c.id} value={c.id}>{c.code} — {c.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Dialog open={showAddCourseDialog} onOpenChange={setShowAddCourseDialog}>
+                  <DialogTrigger asChild>
+                    <Button variant="outline" size="sm"><Plus className="w-4 h-4 mr-1" /> New Course</Button>
+                  </DialogTrigger>
+                  <DialogContent>
+                    <DialogHeader><DialogTitle>Add New Course</DialogTitle></DialogHeader>
+                    <div className="space-y-4 pt-2">
+                      <div>
+                        <label className="text-sm font-medium">Code *</label>
+                        <Input value={newCourse.code} onChange={e => setNewCourse(p => ({ ...p, code: e.target.value }))} placeholder="e.g. MTH101" />
+                      </div>
+                      <div>
+                        <label className="text-sm font-medium">Name *</label>
+                        <Input value={newCourse.name} onChange={e => setNewCourse(p => ({ ...p, name: e.target.value }))} placeholder="Course title" />
+                      </div>
+                      <Button onClick={addCourse} disabled={addingCourse} className="w-full">
+                        {addingCourse ? 'Adding...' : 'Add Course'}
+                      </Button>
+                    </div>
+                  </DialogContent>
+                </Dialog>
+              </div>
+              <p className="text-xs text-muted-foreground mt-2">Click a cell to toggle: empty → <Check className="inline w-3 h-3 text-green-600" /> (Present) → <X className="inline w-3 h-3 text-red-600" /> (Absent) → empty</p>
+              <p className="text-xs text-muted-foreground">Attendance is saved per course. The same student/date for the same course cannot be duplicated.</p>
             </CardHeader>
             <CardContent>
               {students.length === 0 ? (
