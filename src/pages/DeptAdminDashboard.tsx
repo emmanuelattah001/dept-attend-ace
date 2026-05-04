@@ -114,7 +114,6 @@ const DeptAdminDashboard = () => {
 
   const fetchDefaultCourse = async () => {
     if (!profile?.department_id) return;
-    // Try to find existing General Attendance course for this dept
     const { data } = await (supabase as any)
       .from('courses')
       .select('id')
@@ -123,9 +122,9 @@ const DeptAdminDashboard = () => {
       .maybeSingle();
     if (data?.id) {
       setDefaultCourseId(data.id);
+      setSelectedCourseId(prev => prev || data.id);
       return;
     }
-    // Fallback: any course in this dept
     const { data: any2 } = await (supabase as any)
       .from('courses')
       .select('id')
@@ -134,15 +133,18 @@ const DeptAdminDashboard = () => {
       .maybeSingle();
     if (any2?.id) {
       setDefaultCourseId(any2.id);
+      setSelectedCourseId(prev => prev || any2.id);
       return;
     }
-    // Last resort: create one
     const { data: created, error } = await (supabase as any)
       .from('courses')
       .insert({ code: 'GEN001', name: 'General Attendance', department_id: profile.department_id })
       .select('id')
       .single();
-    if (!error && created?.id) setDefaultCourseId(created.id);
+    if (!error && created?.id) {
+      setDefaultCourseId(created.id);
+      setSelectedCourseId(prev => prev || created.id);
+    }
   };
 
   const fetchDepartmentName = async () => {
