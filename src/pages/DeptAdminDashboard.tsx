@@ -40,6 +40,11 @@ const DeptAdminDashboard = () => {
   const [students, setStudents] = useState<Student[]>([]);
   const [departmentName, setDepartmentName] = useState<string>('');
   const [defaultCourseId, setDefaultCourseId] = useState<string | null>(null);
+  const [courses, setCourses] = useState<{ id: string; code: string; name: string }[]>([]);
+  const [selectedCourseId, setSelectedCourseId] = useState<string>('');
+  const [showAddCourseDialog, setShowAddCourseDialog] = useState(false);
+  const [newCourse, setNewCourse] = useState({ code: '', name: '' });
+  const [addingCourse, setAddingCourse] = useState(false);
   const [dateColumns, setDateColumns] = useState<string[]>([new Date().toISOString().split('T')[0]]);
   const [grid, setGrid] = useState<Record<string, Record<string, 'P' | 'A' | ''>>>({});
   const [history, setHistory] = useState<AttendanceRecord[]>([]);
