@@ -260,16 +260,9 @@ const DeptAdminDashboard = () => {
       return;
     }
 
-    // Ensure we have a course_id (NOT NULL in DB)
-    let courseId = defaultCourseId;
+    const courseId = selectedCourseId || defaultCourseId;
     if (!courseId) {
-      await fetchDefaultCourse();
-      courseId = defaultCourseId;
-    }
-    if (!courseId) {
-      toast.error('Could not load department course', {
-        description: 'Please reload the page and try again.',
-      });
+      toast.error('Please select a course first');
       return;
     }
 
