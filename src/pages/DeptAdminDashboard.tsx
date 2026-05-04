@@ -327,12 +327,13 @@ const DeptAdminDashboard = () => {
   };
 
   const fetchAttendanceGrid = async () => {
-  if (!profile?.department_id) return;
+  if (!profile?.department_id || !selectedCourseId) { setGrid({}); return; }
 
   const { data } = await supabase
     .from('attendance')
     .select('student_ref, date, status')
-    .eq('department_id', profile.department_id);
+    .eq('department_id', profile.department_id)
+    .eq('course_id', selectedCourseId);
 
   if (!data) return;
 
