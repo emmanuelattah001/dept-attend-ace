@@ -512,19 +512,23 @@ const generatePDF = (): jsPDF => {
   return doc;
 };
 
-  const sharePDF = async () => {
+  const preparePDFForShare = () => {
     if (history.length === 0) {
       toast.error('No attendance history to share');
       return;
     }
-
+    if (pdfBlobUrl) URL.revokeObjectURL(pdfBlobUrl);
     const doc = generatePDF();
-    const pdfBlob = doc.output('blob');
-    const file = new File([pdfBlob], `attendance_${departmentName}.pdf`, {
-      type: 'application/pdf',
-    });
+    const blob = doc.output('blob');
+    const url = URL.createObjectURL(blob);
+    setPdfBlobUrl(url);
+    setShowShareDialog(true);
+  };
 
-    // Try native share first
+  const shareViaNative = async () => {
+    if (!pdfBlobUrl) return;
+    const blob = await fetch(pdfBlobUrl).then(r => r.blob());
+    const file = new File([blob], `attendance_${departmentName}.pdf`, { type: 'application/pdf' });
     if (navigator.share) {
       try {
         const canShare = navigator.canShare?.({ files: [file] });
@@ -534,17 +538,48 @@ const generatePDF = (): jsPDF => {
             text: `Attendance report for ${departmentName}`,
             files: [file],
           });
+          setShowShareDialog(false);
           return;
         }
       } catch (err: any) {
-        if (err?.name === 'AbortError') return; // user cancelled
-        console.warn('Share failed, falling back to download', err);
+        if (err?.name === 'AbortError') return;
       }
     }
+    toast.error('Native sharing not supported on this device');
+  };
 
-    // Fallback: download
-    doc.save(`attendance_${departmentName}.pdf`);
-    toast.success('PDF downloaded (sharing not supported on this device)');
+  const downloadPDF = () => {
+    if (!pdfBlobUrl) return;
+    const a = document.createElement('a');
+    a.href = pdfBlobUrl;
+    a.download = `attendance_${departmentName}.pdf`;
+    a.click();
+    toast.success('PDF downloaded');
+  };
+
+  const shareViaWhatsApp = () => {
+    if (!pdfBlobUrl) return;
+    downloadPDF();
+    const text = encodeURIComponent(`Attendance Report - ${departmentName}\n(PDF attached separately)`);
+    window.open(`https://wa.me/?text=${text}`, '_blank');
+    setShowShareDialog(false);
+  };
+
+  const shareViaTelegram = () => {
+    if (!pdfBlobUrl) return;
+    downloadPDF();
+    const text = encodeURIComponent(`Attendance Report - ${departmentName}`);
+    window.open(`https://t.me/share/url?url=${text}`, '_blank');
+    setShowShareDialog(false);
+  };
+
+  const shareViaEmail = () => {
+    if (!pdfBlobUrl) return;
+    downloadPDF();
+    const subject = encodeURIComponent(`Attendance Report - ${departmentName}`);
+    const body = encodeURIComponent(`Please find the attendance report for ${departmentName} attached.\n\nGenerated on ${new Date().toLocaleDateString()}`);
+    window.open(`mailto:?subject=${subject}&body=${body}`, '_self');
+    setShowShareDialog(false);
   };
 
 
