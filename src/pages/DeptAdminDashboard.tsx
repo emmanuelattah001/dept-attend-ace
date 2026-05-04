@@ -40,6 +40,11 @@ const DeptAdminDashboard = () => {
   const [students, setStudents] = useState<Student[]>([]);
   const [departmentName, setDepartmentName] = useState<string>('');
   const [defaultCourseId, setDefaultCourseId] = useState<string | null>(null);
+  const [courses, setCourses] = useState<{ id: string; code: string; name: string }[]>([]);
+  const [selectedCourseId, setSelectedCourseId] = useState<string>('');
+  const [showAddCourseDialog, setShowAddCourseDialog] = useState(false);
+  const [newCourse, setNewCourse] = useState({ code: '', name: '' });
+  const [addingCourse, setAddingCourse] = useState(false);
   const [dateColumns, setDateColumns] = useState<string[]>([new Date().toISOString().split('T')[0]]);
   const [grid, setGrid] = useState<Record<string, Record<string, 'P' | 'A' | ''>>>({});
   const [history, setHistory] = useState<AttendanceRecord[]>([]);
@@ -61,13 +66,54 @@ const DeptAdminDashboard = () => {
 
   useEffect(() => {
     if (!profile?.department_id) return;
-    Promise.all([fetchStudents(), fetchHistory(), fetchDepartmentName(), fetchAttendanceGrid(), fetchDefaultCourse()])
+    Promise.all([fetchStudents(), fetchHistory(), fetchDepartmentName(), fetchCourses(), fetchDefaultCourse()])
       .finally(() => setInitialLoading(false));
   }, [profile?.department_id]);
 
+  useEffect(() => {
+    if (selectedCourseId) fetchAttendanceGrid();
+  }, [selectedCourseId]);
+
+  const fetchCourses = async () => {
+    if (!profile?.department_id) return;
+    const { data } = await (supabase as any)
+      .from('courses')
+      .select('id, code, name')
+      .eq('department_id', profile.department_id)
+      .order('code');
+    if (data) setCourses(data);
+  };
+
+  const addCourse = async () => {
+    if (!newCourse.code.trim() || !newCourse.name.trim()) {
+      toast.error('Code and name are required');
+      return;
+    }
+    if (!profile?.department_id) return;
+    setAddingCourse(true);
+    const { data, error } = await (supabase as any)
+      .from('courses')
+      .insert({
+        code: newCourse.code.trim(),
+        name: newCourse.name.trim(),
+        department_id: profile.department_id,
+      })
+      .select('id, code, name')
+      .single();
+    if (error) {
+      toast.error(error.message);
+    } else {
+      toast.success('Course added');
+      setCourses(prev => [...prev, data].sort((a, b) => a.code.localeCompare(b.code)));
+      setSelectedCourseId(data.id);
+      setNewCourse({ code: '', name: '' });
+      setShowAddCourseDialog(false);
+    }
+    setAddingCourse(false);
+  };
+
   const fetchDefaultCourse = async () => {
     if (!profile?.department_id) return;
-    // Try to find existing General Attendance course for this dept
     const { data } = await (supabase as any)
       .from('courses')
       .select('id')
@@ -76,9 +122,9 @@ const DeptAdminDashboard = () => {
       .maybeSingle();
     if (data?.id) {
       setDefaultCourseId(data.id);
+      setSelectedCourseId(prev => prev || data.id);
       return;
     }
-    // Fallback: any course in this dept
     const { data: any2 } = await (supabase as any)
       .from('courses')
       .select('id')
@@ -87,15 +133,18 @@ const DeptAdminDashboard = () => {
       .maybeSingle();
     if (any2?.id) {
       setDefaultCourseId(any2.id);
+      setSelectedCourseId(prev => prev || any2.id);
       return;
     }
-    // Last resort: create one
     const { data: created, error } = await (supabase as any)
       .from('courses')
       .insert({ code: 'GEN001', name: 'General Attendance', department_id: profile.department_id })
       .select('id')
       .single();
-    if (!error && created?.id) setDefaultCourseId(created.id);
+    if (!error && created?.id) {
+      setDefaultCourseId(created.id);
+      setSelectedCourseId(prev => prev || created.id);
+    }
   };
 
   const fetchDepartmentName = async () => {
@@ -211,16 +260,9 @@ const DeptAdminDashboard = () => {
       return;
     }
 
-    // Ensure we have a course_id (NOT NULL in DB)
-    let courseId = defaultCourseId;
+    const courseId = selectedCourseId || defaultCourseId;
     if (!courseId) {
-      await fetchDefaultCourse();
-      courseId = defaultCourseId;
-    }
-    if (!courseId) {
-      toast.error('Could not load department course', {
-        description: 'Please reload the page and try again.',
-      });
+      toast.error('Please select a course first');
       return;
     }
 
@@ -285,12 +327,13 @@ const DeptAdminDashboard = () => {
   };
 
   const fetchAttendanceGrid = async () => {
-  if (!profile?.department_id) return;
+  if (!profile?.department_id || !selectedCourseId) { setGrid({}); return; }
 
   const { data } = await supabase
     .from('attendance')
     .select('student_ref, date, status')
-    .eq('department_id', profile.department_id);
+    .eq('department_id', profile.department_id)
+    .eq('course_id', selectedCourseId);
 
   if (!data) return;
 
@@ -765,8 +808,42 @@ const generatePDF = (): jsPDF => {
                   </Button>
                 </div>
               </div>
-              <p className="text-xs text-muted-foreground mt-1">Click a cell to toggle: empty → <Check className="inline w-3 h-3 text-green-600" /> (Present) → <X className="inline w-3 h-3 text-red-600" /> (Absent) → empty</p>
-              <p className="text-xs text-muted-foreground">Use bulk buttons below each date to mark all students at once.</p>
+              <div className="flex items-center gap-2 mt-3 flex-wrap">
+                <span className="text-sm font-medium">Course:</span>
+                <Select value={selectedCourseId} onValueChange={setSelectedCourseId}>
+                  <SelectTrigger className="w-[260px] h-9">
+                    <SelectValue placeholder="Select a course" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {courses.map(c => (
+                      <SelectItem key={c.id} value={c.id}>{c.code} — {c.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Dialog open={showAddCourseDialog} onOpenChange={setShowAddCourseDialog}>
+                  <DialogTrigger asChild>
+                    <Button variant="outline" size="sm"><Plus className="w-4 h-4 mr-1" /> New Course</Button>
+                  </DialogTrigger>
+                  <DialogContent>
+                    <DialogHeader><DialogTitle>Add New Course</DialogTitle></DialogHeader>
+                    <div className="space-y-4 pt-2">
+                      <div>
+                        <label className="text-sm font-medium">Code *</label>
+                        <Input value={newCourse.code} onChange={e => setNewCourse(p => ({ ...p, code: e.target.value }))} placeholder="e.g. MTH101" />
+                      </div>
+                      <div>
+                        <label className="text-sm font-medium">Name *</label>
+                        <Input value={newCourse.name} onChange={e => setNewCourse(p => ({ ...p, name: e.target.value }))} placeholder="Course title" />
+                      </div>
+                      <Button onClick={addCourse} disabled={addingCourse} className="w-full">
+                        {addingCourse ? 'Adding...' : 'Add Course'}
+                      </Button>
+                    </div>
+                  </DialogContent>
+                </Dialog>
+              </div>
+              <p className="text-xs text-muted-foreground mt-2">Click a cell to toggle: empty → <Check className="inline w-3 h-3 text-green-600" /> (Present) → <X className="inline w-3 h-3 text-red-600" /> (Absent) → empty</p>
+              <p className="text-xs text-muted-foreground">Attendance is saved per course. The same student/date for the same course cannot be duplicated.</p>
             </CardHeader>
             <CardContent>
               {students.length === 0 ? (
