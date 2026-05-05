@@ -492,10 +492,11 @@ const DeptAdminDashboard = () => {
     try {
       for (const item of unsynced) {
         try {
-          const { error: deleteError } = await (supabase as any)
+           const { error: deleteError } = await (supabase as any)
             .from('attendance')
             .delete()
             .eq('student_ref', item.studentId)
+            .eq('course_id', item.courseId)
             .eq('date', item.date);
           
           if (deleteError) {
@@ -711,17 +712,30 @@ const DeptAdminDashboard = () => {
       const fileName = `attendance_${departmentName}_${currentCourse?.code || 'all'}.pdf`;
       const file = new File([pdfBlob], fileName, { type: 'application/pdf' });
 
-      if (navigator.share) {
-        await navigator.share({
-          title: 'Attendance Report',
-          text: `Attendance report for ${departmentName}${currentCourse ? ` - ${currentCourse.name}` : ''}`,
-          files: [file],
-        });
-        toast.success('PDF shared successfully');
-      } else {
-        doc.save(fileName);
-        toast.success('PDF downloaded');
+      const shareData = {
+        title: 'Attendance Report',
+        text: `Attendance report for ${departmentName}${currentCourse ? ` - ${currentCourse.name}` : ''}`,
+        files: [file],
+      };
+
+      const canShareFiles = typeof navigator !== 'undefined'
+        && typeof navigator.canShare === 'function'
+        && navigator.canShare(shareData);
+
+      if (canShareFiles) {
+        try {
+          await navigator.share(shareData);
+          toast.success('PDF shared successfully');
+          return;
+        } catch (err: any) {
+          if (err?.name === 'AbortError') return;
+          // Permission denied (e.g. inside iframe) — fall through to download
+          console.warn('Native share unavailable, falling back to download:', err);
+        }
       }
+
+      doc.save(fileName);
+      toast.success('PDF downloaded');
     } catch (error: any) {
       if (error?.name !== 'AbortError') {
         console.error('Share error:', error);
