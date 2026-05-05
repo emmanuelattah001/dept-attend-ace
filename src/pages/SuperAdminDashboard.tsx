@@ -6,7 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { toast } from 'sonner';
-import { Plus, Building2, Users, CalendarCheck, Download } from 'lucide-react';
+import { Plus, Building2, Users, CalendarCheck, Download, UserCog } from 'lucide-react';
 import DashboardLayout from '@/components/DashboardLayout';
 import LoadingScreen from '@/components/LoadingScreen';
 
@@ -21,6 +21,8 @@ interface ProfileRow {
   name: string;
   email: string;
   department_id: string | null;
+  department?: string; // For display
+  role?: string; // For display
 }
 
 interface AttendanceRow {
@@ -33,10 +35,16 @@ interface AttendanceRow {
   departments: { name: string } | null;
 }
 
+interface UserRole {
+  user_id: string;
+  role: string;
+}
+
 const SuperAdminDashboard = () => {
   const [departments, setDepartments] = useState<Department[]>([]);
   const [newDeptName, setNewDeptName] = useState('');
   const [users, setUsers] = useState<ProfileRow[]>([]);
+  const [userRoles, setUserRoles] = useState<UserRole[]>([]);
   const [attendance, setAttendance] = useState<AttendanceRow[]>([]);
   const [selectedUser, setSelectedUser] = useState('');
   const [selectedDept, setSelectedDept] = useState('');
@@ -52,8 +60,39 @@ const SuperAdminDashboard = () => {
   };
 
   const fetchUsers = async () => {
-    const { data } = await supabase.from('profiles').select('*').order('name');
-    if (data) setUsers(data as ProfileRow[]);
+    const { data: profiles } = await supabase.from('profiles').select('*').order('name');
+    
+    if (profiles) {
+      // Fetch roles for all users
+      const { data: roles } = await supabase.from('user_roles').select('user_id, role');
+      
+      const rolesMap = new Map();
+      if (roles) {
+        roles.forEach(role => {
+          rolesMap.set(role.user_id, role.role);
+        });
+      }
+      
+      // Create a map for department names
+      const deptMap = new Map();
+      departments.forEach(dept => {
+        deptMap.set(dept.id, dept.name);
+      });
+      
+      // Add department name and role to each user
+      const usersWithDetails = profiles.map(profile => ({
+        ...profile,
+        department: profile.department_id ? deptMap.get(profile.department_id) || 'Not Assigned' : 'Not Assigned',
+        role: rolesMap.get(profile.user_id) || 'No Role'
+      }));
+      
+      setUsers(usersWithDetails as ProfileRow[]);
+    }
+  };
+
+  const fetchUserRoles = async () => {
+    const { data } = await supabase.from('user_roles').select('user_id, role');
+    if (data) setUserRoles(data);
   };
 
   const fetchAttendance = async () => {
@@ -75,13 +114,21 @@ const SuperAdminDashboard = () => {
   };
 
   useEffect(() => {
-    Promise.all([fetchDepartments(), fetchUsers()])
+    Promise.all([fetchDepartments(), fetchUserRoles()])
+      .then(() => fetchUsers())
       .finally(() => setInitialLoading(false));
   }, []);
 
   useEffect(() => {
     fetchAttendance();
   }, [filterDept, filterDate]);
+
+  // Refresh users when departments change (for department names)
+  useEffect(() => {
+    if (!initialLoading) {
+      fetchUsers();
+    }
+  }, [departments]);
 
   const createDepartment = async () => {
     if (!newDeptName.trim()) return;
@@ -108,6 +155,10 @@ const SuperAdminDashboard = () => {
       toast.error(error.message);
     } else {
       toast.success('Role assigned');
+      fetchUserRoles();
+      fetchUsers();
+      setSelectedUser('');
+      setSelectedRole('');
     }
   };
 
@@ -122,6 +173,8 @@ const SuperAdminDashboard = () => {
     } else {
       toast.success('Department assigned');
       fetchUsers();
+      setSelectedUser('');
+      setSelectedDept('');
     }
   };
 
@@ -158,8 +211,8 @@ const SuperAdminDashboard = () => {
   const absentCount = attendance.filter(a => a.status === 'absent').length;
 
   const statusStyles: Record<string, string> = {
-    present: 'bg-success text-success-foreground',
-    absent: 'bg-destructive text-destructive-foreground',
+    present: 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200',
+    absent: 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200',
   };
 
   const tabs = [
@@ -171,6 +224,13 @@ const SuperAdminDashboard = () => {
   if (initialLoading) {
     return <LoadingScreen message="Loading dashboard..." />;
   }
+
+  // Get user display text with department info
+  const getUserDisplayText = (user: ProfileRow) => {
+    const roleText = user.role && user.role !== 'No Role' ? ` (${user.role})` : '';
+    const deptText = user.department && user.department !== 'Not Assigned' ? ` - ${user.department}` : '';
+    return `${user.name} (${user.email})${roleText}${deptText}`;
+  };
 
   return (
     <DashboardLayout>
@@ -219,43 +279,143 @@ const SuperAdminDashboard = () => {
         )}
 
         {activeTab === 'users' && (
-          <Card>
-            <CardHeader><CardTitle className="text-lg">Assign Roles & Departments</CardTitle></CardHeader>
-            <CardContent className="space-y-4">
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-                <Select value={selectedUser} onValueChange={setSelectedUser}>
-                  <SelectTrigger><SelectValue placeholder="Select user" /></SelectTrigger>
-                  <SelectContent>
-                    {users.map(u => <SelectItem key={u.user_id} value={u.user_id}>{u.name} ({u.email})</SelectItem>)}
-                  </SelectContent>
-                </Select>
-                <Select value={selectedRole} onValueChange={setSelectedRole}>
-                  <SelectTrigger><SelectValue placeholder="Select role" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="super_admin">Super Admin</SelectItem>
-                    <SelectItem value="dept_admin">Dept Admin</SelectItem>
-                    <SelectItem value="student">Student</SelectItem>
-                  </SelectContent>
-                </Select>
-                <Button onClick={assignRole} disabled={!selectedUser || !selectedRole}>Assign Role</Button>
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-                <Select value={selectedUser} onValueChange={setSelectedUser}>
-                  <SelectTrigger><SelectValue placeholder="Select user" /></SelectTrigger>
-                  <SelectContent>
-                    {users.map(u => <SelectItem key={u.user_id} value={u.user_id}>{u.name} ({u.email})</SelectItem>)}
-                  </SelectContent>
-                </Select>
-                <Select value={selectedDept} onValueChange={setSelectedDept}>
-                  <SelectTrigger><SelectValue placeholder="Select department" /></SelectTrigger>
-                  <SelectContent>
-                    {departments.map(d => <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>)}
-                  </SelectContent>
-                </Select>
-                <Button onClick={assignDepartment} disabled={!selectedUser || !selectedDept}>Assign Department</Button>
-              </div>
-            </CardContent>
-          </Card>
+          <div className="space-y-6">
+            {/* User Assignment Cards */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-lg">Assign Roles & Departments</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-6">
+                {/* Role Assignment */}
+                <div className="space-y-3">
+                  <h3 className="text-sm font-medium text-muted-foreground">Assign Role</h3>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                    <Select value={selectedUser} onValueChange={setSelectedUser}>
+                      <SelectTrigger className="w-full">
+                        <SelectValue placeholder="Select user">
+                          {selectedUser && users.find(u => u.user_id === selectedUser) && 
+                            getUserDisplayText(users.find(u => u.user_id === selectedUser)!)
+                          }
+                        </SelectValue>
+                      </SelectTrigger>
+                      <SelectContent>
+                        {users.map(u => (
+                          <SelectItem key={u.user_id} value={u.user_id}>
+                            {getUserDisplayText(u)}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <Select value={selectedRole} onValueChange={setSelectedRole}>
+                      <SelectTrigger><SelectValue placeholder="Select role" /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="super_admin">Super Admin</SelectItem>
+                        <SelectItem value="dept_admin">Dept Admin</SelectItem>
+                        <SelectItem value="student">Student</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <Button onClick={assignRole} disabled={!selectedUser || !selectedRole}>
+                      Assign Role
+                    </Button>
+                    <div className="text-sm text-muted-foreground flex items-center">
+                      <UserCog className="w-4 h-4 mr-1" />
+                      Current role will be replaced
+                    </div>
+                  </div>
+                </div>
+
+                {/* Department Assignment */}
+                <div className="space-y-3">
+                  <h3 className="text-sm font-medium text-muted-foreground">Assign Department</h3>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                    <Select value={selectedUser} onValueChange={setSelectedUser}>
+                      <SelectTrigger className="w-full">
+                        <SelectValue placeholder="Select user">
+                          {selectedUser && users.find(u => u.user_id === selectedUser) && 
+                            getUserDisplayText(users.find(u => u.user_id === selectedUser)!)
+                          }
+                        </SelectValue>
+                      </SelectTrigger>
+                      <SelectContent>
+                        {users.map(u => (
+                          <SelectItem key={u.user_id} value={u.user_id}>
+                            {getUserDisplayText(u)}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <Select value={selectedDept} onValueChange={setSelectedDept}>
+                      <SelectTrigger><SelectValue placeholder="Select department" /></SelectTrigger>
+                      <SelectContent>
+                        {departments.map(d => <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                    <Button onClick={assignDepartment} disabled={!selectedUser || !selectedDept}>
+                      Assign Department
+                    </Button>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Users List Table */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-lg">All Users with Assignments</CardTitle>
+                <p className="text-sm text-muted-foreground">View all users and their current role and department assignments</p>
+              </CardHeader>
+              <CardContent>
+                <div className="overflow-x-auto">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>#</TableHead>
+                        <TableHead>Name</TableHead>
+                        <TableHead>Email</TableHead>
+                        <TableHead>Role</TableHead>
+                        <TableHead>Department</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {users.map((user, index) => (
+                        <TableRow key={user.user_id}>
+                          <TableCell className="font-medium">{index + 1}</TableCell>
+                          <TableCell>{user.name}</TableCell>
+                          <TableCell>{user.email}</TableCell>
+                          <TableCell>
+                            <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+                              user.role === 'super_admin' ? 'bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200' :
+                              user.role === 'dept_admin' ? 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200' :
+                              user.role === 'student' ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200' :
+                              'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-300'
+                            }`}>
+                              {user.role || 'Not Assigned'}
+                            </span>
+                          </TableCell>
+                          <TableCell>
+                            <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+                              user.department && user.department !== 'Not Assigned'
+                                ? 'bg-cyan-100 text-cyan-800 dark:bg-cyan-900 dark:text-cyan-200'
+                                : 'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-300'
+                            }`}>
+                              {user.department || 'Not Assigned'}
+                            </span>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                      {users.length === 0 && (
+                        <TableRow>
+                          <TableCell colSpan={5} className="text-center text-muted-foreground">
+                            No users found
+                          </TableCell>
+                        </TableRow>
+                      )}
+                    </TableBody>
+                  </Table>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
         )}
 
         {activeTab === 'attendance' && (

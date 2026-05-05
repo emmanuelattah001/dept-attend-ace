@@ -7,8 +7,13 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { Badge } from '@/components/ui/badge';
 import { toast } from 'sonner';
-import { CalendarCheck, Download, History, Users, Plus, Upload, Save, Trash2, Share2, Check, X, CheckCheck, XCircle, Search, AlertTriangle, Mail, MessageCircle, Send, Smartphone } from 'lucide-react';
+import { 
+  CalendarCheck, Download, History, Users, Plus, Upload, Save, Trash2, 
+  Check, X, CheckCheck, XCircle, Search, Database, BookOpen, AlertCircle, 
+  RefreshCw, WifiOff, Loader2 
+} from 'lucide-react';
 import DashboardLayout from '@/components/DashboardLayout';
 import LoadingScreen from '@/components/LoadingScreen';
 import * as XLSX from "xlsx";
@@ -23,39 +28,62 @@ interface Student {
   department_id: string;
 }
 
+interface Course {
+  id: string;
+  name: string;
+  code: string;
+  department_id: string;
+}
+
 interface AttendanceRecord {
   id: string;
   student_ref: string;
+  course_id: string;
   date: string;
   status: string;
   students: {
-  name: string;
-  matric_no: string | null;
-  gender: string | null;
-} | null;
+    name: string;
+    matric_no: string | null;
+    gender: string | null;
+  } | null;
+  courses: {
+    name: string;
+    code: string;
+  } | null;
+}
+
+interface LocalAttendance {
+  studentId: string;
+  courseId: string;
+  date: string;
+  status: 'P' | 'A';
+  synced: boolean;
+  error?: string;
 }
 
 const DeptAdminDashboard = () => {
   const { profile, user } = useAuth();
   const [students, setStudents] = useState<Student[]>([]);
   const [departmentName, setDepartmentName] = useState<string>('');
-  const [defaultCourseId, setDefaultCourseId] = useState<string | null>(null);
-  const [courses, setCourses] = useState<{ id: string; code: string; name: string }[]>([]);
-  const [selectedCourseId, setSelectedCourseId] = useState<string>('');
-  const [showAddCourseDialog, setShowAddCourseDialog] = useState(false);
-  const [newCourse, setNewCourse] = useState({ code: '', name: '' });
-  const [addingCourse, setAddingCourse] = useState(false);
+  const [courses, setCourses] = useState<Course[]>([]);
+  const [selectedCourse, setSelectedCourse] = useState<string>('');
   const [dateColumns, setDateColumns] = useState<string[]>([new Date().toISOString().split('T')[0]]);
   const [grid, setGrid] = useState<Record<string, Record<string, 'P' | 'A' | ''>>>({});
+  const [localAttendance, setLocalAttendance] = useState<LocalAttendance[]>([]);
   const [history, setHistory] = useState<AttendanceRecord[]>([]);
   const [activeTab, setActiveTab] = useState<'mark' | 'history' | 'students'>('mark');
   const [studentEdits, setStudentEdits] = useState<Record<string, Partial<Student>>>({});
   const [savingStudents, setSavingStudents] = useState(false);
-  const [savingAttendance, setSavingAttendance] = useState(false);
+  const [syncingAttendance, setSyncingAttendance] = useState(false);
+  const [connectionStatus, setConnectionStatus] = useState<'online' | 'offline' | 'checking'>('checking');
 
   const [showAddDialog, setShowAddDialog] = useState(false);
   const [newStudent, setNewStudent] = useState({ name: '', gender: '', matric_no: '' });
   const [addingStudent, setAddingStudent] = useState(false);
+
+  const [showCourseDialog, setShowCourseDialog] = useState(false);
+  const [newCourse, setNewCourse] = useState({ name: '', code: '' });
+  const [addingCourse, setAddingCourse] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [importing, setImporting] = useState(false);
@@ -63,145 +91,283 @@ const DeptAdminDashboard = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [filterPercent, setFilterPercent] = useState<string>('all');
   const [deletingHistory, setDeletingHistory] = useState(false);
-  const [showShareDialog, setShowShareDialog] = useState(false);
-  const [pdfBlobUrl, setPdfBlobUrl] = useState<string | null>(null);
+
+  // Check connection status
+  useEffect(() => {
+    const checkConnection = async () => {
+      setConnectionStatus('checking');
+      try {
+        const { error } = await supabase.from('attendance').select('count', { count: 'exact', head: true });
+        setConnectionStatus(error ? 'offline' : 'online');
+      } catch {
+        setConnectionStatus('offline');
+      }
+    };
+    
+    checkConnection();
+    const interval = setInterval(checkConnection, 30000);
+    return () => clearInterval(interval);
+  }, []);
 
   useEffect(() => {
     if (!profile?.department_id) return;
-    Promise.all([fetchStudents(), fetchHistory(), fetchDepartmentName(), fetchCourses(), fetchDefaultCourse()])
-      .finally(() => setInitialLoading(false));
+    initializeDashboard();
   }, [profile?.department_id]);
 
   useEffect(() => {
-    if (selectedCourseId) fetchAttendanceGrid();
-  }, [selectedCourseId]);
+    if (!initialLoading) {
+      saveLocalAttendance();
+    }
+  }, [localAttendance]);
+
+  useEffect(() => {
+    if (selectedCourse) {
+      fetchAttendanceGrid();
+    }
+  }, [selectedCourse, dateColumns]);
+
+  const initializeDashboard = async () => {
+    try {
+      setInitialLoading(true);
+      await Promise.all([
+        fetchStudents(),
+        fetchHistory(),
+        fetchDepartmentName(),
+        fetchCourses(),
+        loadLocalAttendance()
+      ]);
+    } catch (error) {
+      console.error('Error initializing dashboard:', error);
+      toast.error('Failed to load dashboard data. Please refresh the page.');
+    } finally {
+      setInitialLoading(false);
+    }
+  };
+
+  const loadLocalAttendance = () => {
+    const saved = localStorage.getItem(`attendance_${profile?.department_id}`);
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        setLocalAttendance(parsed);
+        
+        const localGrid: Record<string, Record<string, 'P' | 'A' | ''>> = {};
+        parsed.forEach((item: LocalAttendance) => {
+          if (!localGrid[item.studentId]) localGrid[item.studentId] = {};
+          localGrid[item.studentId][item.date] = item.status;
+        });
+        
+        setGrid(prev => {
+          const merged = { ...prev };
+          Object.keys(localGrid).forEach(studentId => {
+            merged[studentId] = { ...merged[studentId], ...localGrid[studentId] };
+          });
+          return merged;
+        });
+        
+        const pendingCount = parsed.filter((item: LocalAttendance) => !item.synced).length;
+        if (pendingCount > 0) {
+          toast.info(`${pendingCount} unsynced attendance records found`);
+        }
+      } catch (e) {
+        console.error('Failed to load local attendance:', e);
+        toast.error('Failed to load saved attendance data');
+      }
+    }
+  };
+
+  const saveLocalAttendance = () => {
+    try {
+      localStorage.setItem(`attendance_${profile?.department_id}`, JSON.stringify(localAttendance));
+    } catch (e) {
+      console.error('Failed to save local attendance:', e);
+    }
+  };
+
+  const clearLocalAttendance = () => {
+    localStorage.removeItem(`attendance_${profile?.department_id}`);
+    setLocalAttendance([]);
+    toast.success('Local attendance data cleared');
+  };
+
+  const fetchDepartmentName = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('departments')
+        .select('name')
+        .eq('id', profile!.department_id!)
+        .single();
+      
+      if (error) throw error;
+      if (data) setDepartmentName(data.name);
+    } catch (error) {
+      console.error('Error fetching department:', error);
+      setDepartmentName('Unknown Department');
+    }
+  };
 
   const fetchCourses = async () => {
+    try {
+      const { data, error } = await (supabase as any)
+        .from('courses')
+        .select('*')
+        .eq('department_id', profile!.department_id!)
+        .order('name');
+      
+      if (error) throw error;
+      
+      if (data && data.length > 0) {
+        setCourses(data as Course[]);
+        if (!selectedCourse) {
+          setSelectedCourse(data[0].id);
+        }
+      } else {
+        const { data: newCourse, error: createError } = await (supabase as any)
+          .from('courses')
+          .insert({
+            name: 'General Attendance',
+            code: 'GEN001',
+            department_id: profile!.department_id
+          })
+          .select()
+          .single();
+        
+        if (createError) throw createError;
+        if (newCourse) {
+          setCourses([newCourse]);
+          setSelectedCourse(newCourse.id);
+          toast.success('Created default course');
+        }
+      }
+    } catch (error: any) {
+      console.error('Error fetching courses:', error);
+      toast.error(`Failed to load courses: ${error.message}`);
+    }
+  };
+
+  const fetchStudents = async () => {
+    try {
+      const { data, error } = await (supabase as any)
+        .from('students')
+        .select('id, name, gender, matric_no, department_id')
+        .eq('department_id', profile!.department_id!)
+        .order('name');
+      
+      if (error) throw error;
+      if (data) setStudents(data as Student[]);
+    } catch (error: any) {
+      console.error('Error fetching students:', error);
+      toast.error(`Failed to load students: ${error.message}`);
+    }
+  };
+
+  const fetchHistory = async () => {
+    try {
+      let allData: AttendanceRecord[] = [];
+      let from = 0;
+      const pageSize = 1000;
+      let hasMore = true;
+
+      while (hasMore) {
+        const { data, error } = await (supabase as any)
+          .from('attendance')
+          .select(`
+              id,
+              student_ref,
+              course_id,
+              date,
+              status,
+              students:student_ref (
+                name,
+                matric_no,
+                gender
+              ),
+              courses:course_id (
+                name,
+                code
+              )
+            `)
+          .eq('department_id', profile!.department_id!)
+          .order('date', { ascending: false })
+          .range(from, from + pageSize - 1);
+
+        if (error) throw error;
+
+        if (data && data.length > 0) {
+          allData = [...allData, ...(data as AttendanceRecord[])];
+          from += pageSize;
+          hasMore = data.length === pageSize;
+        } else {
+          hasMore = false;
+        }
+      }
+
+      setHistory(allData);
+    } catch (error: any) {
+      console.error('Error fetching history:', error);
+      toast.error(`Failed to load history: ${error.message}`);
+    }
+  };
+
+  const fetchAttendanceGrid = async () => {
     if (!profile?.department_id) return;
-    const { data } = await (supabase as any)
-      .from('courses')
-      .select('id, code, name')
-      .eq('department_id', profile.department_id)
-      .order('code');
-    if (data) setCourses(data);
+
+    try {
+      const { data, error } = await supabase
+        .from('attendance')
+        .select('student_ref, date, status')
+        .eq('department_id', profile.department_id);
+
+      if (error) throw error;
+
+      if (!data) return;
+
+      const newGrid: any = {};
+      data.forEach((r: any) => {
+        const val = r.status === 'present' ? 'P' : 'A';
+        if (!newGrid[r.student_ref]) newGrid[r.student_ref] = {};
+        newGrid[r.student_ref][r.date] = val;
+      });
+
+      const unsynced = localAttendance.filter(item => !item.synced);
+      unsynced.forEach(item => {
+        if (!newGrid[item.studentId]) newGrid[item.studentId] = {};
+        newGrid[item.studentId][item.date] = item.status;
+      });
+
+      setGrid(newGrid);
+    } catch (error: any) {
+      console.error('Error fetching attendance grid:', error);
+    }
   };
 
   const addCourse = async () => {
-    if (!newCourse.code.trim() || !newCourse.name.trim()) {
-      toast.error('Code and name are required');
+    if (!newCourse.name.trim() || !newCourse.code.trim()) {
+      toast.error('Course name and code are required');
       return;
     }
     if (!profile?.department_id) return;
     setAddingCourse(true);
-    const { data, error } = await (supabase as any)
-      .from('courses')
-      .insert({
-        code: newCourse.code.trim(),
+
+    try {
+      const { error } = await (supabase as any).from('courses').insert({
         name: newCourse.name.trim(),
+        code: newCourse.code.trim().toUpperCase(),
         department_id: profile.department_id,
-      })
-      .select('id, code, name')
-      .single();
-    if (error) {
-      toast.error(error.message);
-    } else {
-      toast.success('Course added');
-      setCourses(prev => [...prev, data].sort((a, b) => a.code.localeCompare(b.code)));
-      setSelectedCourseId(data.id);
-      setNewCourse({ code: '', name: '' });
-      setShowAddCourseDialog(false);
+      });
+
+      if (error) throw error;
+
+      toast.success('Course added successfully');
+      setNewCourse({ name: '', code: '' });
+      setShowCourseDialog(false);
+      await fetchCourses();
+    } catch (error: any) {
+      console.error('Error adding course:', error);
+      toast.error(`Failed to add course: ${error.message}`);
+    } finally {
+      setAddingCourse(false);
     }
-    setAddingCourse(false);
-  };
-
-  const fetchDefaultCourse = async () => {
-    if (!profile?.department_id) return;
-    const { data } = await (supabase as any)
-      .from('courses')
-      .select('id')
-      .eq('department_id', profile.department_id)
-      .eq('code', 'GEN001')
-      .maybeSingle();
-    if (data?.id) {
-      setDefaultCourseId(data.id);
-      setSelectedCourseId(prev => prev || data.id);
-      return;
-    }
-    const { data: any2 } = await (supabase as any)
-      .from('courses')
-      .select('id')
-      .eq('department_id', profile.department_id)
-      .limit(1)
-      .maybeSingle();
-    if (any2?.id) {
-      setDefaultCourseId(any2.id);
-      setSelectedCourseId(prev => prev || any2.id);
-      return;
-    }
-    const { data: created, error } = await (supabase as any)
-      .from('courses')
-      .insert({ code: 'GEN001', name: 'General Attendance', department_id: profile.department_id })
-      .select('id')
-      .single();
-    if (!error && created?.id) {
-      setDefaultCourseId(created.id);
-      setSelectedCourseId(prev => prev || created.id);
-    }
-  };
-
-  const fetchDepartmentName = async () => {
-    const { data } = await supabase
-      .from('departments')
-      .select('name')
-      .eq('id', profile!.department_id!)
-      .single();
-    if (data) setDepartmentName(data.name);
-  };
-
-  const fetchStudents = async () => {
-    const { data } = await (supabase as any)
-      .from('students')
-      .select('id, name, gender, matric_no, department_id')
-      .eq('department_id', profile!.department_id!)
-      .order('name');
-    if (data) setStudents(data as Student[]);
-  };
-
-  const fetchHistory = async () => {
-    // Fetch all records using pagination to avoid Supabase row limits
-    let allData: AttendanceRecord[] = [];
-    let from = 0;
-    const pageSize = 1000;
-    let hasMore = true;
-
-    while (hasMore) {
-      const { data } = await (supabase as any)
-        .from('attendance')
-        .select(`
-            id,
-            student_ref,
-            date,
-            status,
-            students:student_ref (
-              name,
-              matric_no,
-              gender
-            )
-          `)
-        .eq('department_id', profile!.department_id!)
-        .order('date', { ascending: false })
-        .range(from, from + pageSize - 1);
-
-      if (data && data.length > 0) {
-        allData = [...allData, ...(data as AttendanceRecord[])];
-        from += pageSize;
-        hasMore = data.length === pageSize;
-      } else {
-        hasMore = false;
-      }
-    }
-
-    setHistory(allData);
   };
 
   const addDateColumn = () => {
@@ -233,15 +399,39 @@ const DeptAdminDashboard = () => {
       }
       return next;
     });
+    setLocalAttendance(prev => prev.filter(item => item.date !== dateToRemove));
   };
 
   const toggleCell = (studentId: string, date: string) => {
     setGrid(prev => {
       const current = prev[studentId]?.[date] || '';
-      const next = current === '' ? 'P' : current === 'P' ? 'A' : '';
+      const nextStatus = current === '' ? 'P' : current === 'P' ? 'A' : '';
+      
+      setLocalAttendance(prevLocal => {
+        const existing = prevLocal.find(item => 
+          item.studentId === studentId && item.date === date
+        );
+        if (existing) {
+          if (nextStatus === '') {
+            return prevLocal.filter(item => 
+              !(item.studentId === studentId && item.date === date)
+            );
+          } else {
+            return prevLocal.map(item => 
+              item.studentId === studentId && item.date === date
+                ? { ...item, status: nextStatus, synced: false, error: undefined, courseId: selectedCourse }
+                : item
+            );
+          }
+        } else if (nextStatus !== '') {
+          return [...prevLocal, { studentId, courseId: selectedCourse, date, status: nextStatus, synced: false }];
+        }
+        return prevLocal;
+      });
+      
       return {
         ...prev,
-        [studentId]: { ...prev[studentId], [date]: next },
+        [studentId]: { ...prev[studentId], [date]: nextStatus },
       };
     });
   };
@@ -250,106 +440,129 @@ const DeptAdminDashboard = () => {
     setGrid(prev => {
       const next = { ...prev };
       for (const student of students) {
-        next[student.id] = { ...next[student.id], [date]: status };
+        if (next[student.id]) {
+          next[student.id][date] = status;
+        } else {
+          next[student.id] = { [date]: status };
+        }
+        
+        setLocalAttendance(prevLocal => {
+          const existing = prevLocal.find(item => 
+            item.studentId === student.id && item.date === date
+          );
+          if (existing) {
+            return prevLocal.map(item => 
+              item.studentId === student.id && item.date === date
+                ? { ...item, status, synced: false, error: undefined, courseId: selectedCourse }
+                : item
+            );
+          } else {
+            return [...prevLocal, { studentId: student.id, courseId: selectedCourse, date, status, synced: false }];
+          }
+        });
       }
       return next;
     });
+    
+    toast.info(`Marked all students as ${status === 'P' ? 'Present' : 'Absent'} for ${date}`);
+  };
+
+  const syncAttendanceToDatabase = async () => {
+    if (connectionStatus === 'offline') {
+      toast.error('You are offline. Please check your internet connection and try again.');
+      return;
+    }
+    
+    if (!profile?.department_id || !user?.id) {
+      toast.error('Missing department or user information');
+      return;
+    }
+    
+    const unsynced = localAttendance.filter(item => !item.synced);
+    if (unsynced.length === 0) {
+      toast.info('No unsynced attendance records to save');
+      return;
+    }
+    
+    setSyncingAttendance(true);
+    
+    let successCount = 0;
+    let errorCount = 0;
+    
+    try {
+      for (const item of unsynced) {
+        try {
+          const { error: deleteError } = await (supabase as any)
+            .from('attendance')
+            .delete()
+            .eq('student_ref', item.studentId)
+            .eq('date', item.date);
+          
+          if (deleteError) {
+            console.error('Delete error:', deleteError);
+          }
+          
+          const { error: insertError } = await (supabase as any)
+            .from('attendance')
+            .insert({
+              student_ref: item.studentId,
+              course_id: item.courseId,
+              department_id: profile.department_id,
+              marked_by: user.id,
+              date: item.date,
+              status: item.status === 'P' ? 'present' : 'absent',
+            });
+          
+          if (insertError) {
+            console.error('Insert error:', insertError);
+            errorCount++;
+          } else {
+            successCount++;
+          }
+        } catch (err) {
+          console.error('Error processing record:', err);
+          errorCount++;
+        }
+      }
+      
+      if (successCount > 0) {
+        setLocalAttendance(prev => 
+          prev.map(item => {
+            const wasSynced = unsynced.some(u => 
+              u.studentId === item.studentId && u.date === item.date
+            );
+            return wasSynced ? { ...item, synced: true, error: undefined } : item;
+          })
+        );
+        
+        toast.success(`Successfully synced ${successCount} attendance record${successCount !== 1 ? 's' : ''}`);
+        await fetchAttendanceGrid();
+        await fetchHistory();
+      }
+      
+      if (errorCount > 0) {
+        toast.error(`Failed to sync ${errorCount} record${errorCount !== 1 ? 's' : ''}. Please try again.`);
+      }
+    } catch (error: any) {
+      console.error('Sync error:', error);
+      toast.error(`Sync failed: ${error.message || 'Unknown error'}`);
+      
+      setLocalAttendance(prev => 
+        prev.map(item => {
+          const wasUnsynced = unsynced.some(u => 
+            u.studentId === item.studentId && u.date === item.date
+          );
+          return wasUnsynced ? { ...item, error: error.message } : item;
+        })
+      );
+    } finally {
+      setSyncingAttendance(false);
+    }
   };
 
   const saveAttendance = async () => {
-    if (!profile?.department_id || !user?.id) {
-      toast.error('Not signed in', { description: 'Please refresh and log in again.' });
-      return;
-    }
-
-    const courseId = selectedCourseId || defaultCourseId;
-    if (!courseId) {
-      toast.error('Please select a course first');
-      return;
-    }
-
-    const rows: any[] = [];
-    for (const student of students) {
-      for (const date of dateColumns) {
-        const val = grid[student.id]?.[date];
-        if (val === 'P' || val === 'A') {
-          rows.push({
-            student_ref: student.id,
-            course_id: courseId,
-            department_id: profile.department_id,
-            marked_by: user.id,
-            date,
-            status: val === 'P' ? 'present' : 'absent',
-          });
-        }
-      }
-    }
-
-    if (rows.length === 0) {
-      toast.error('No attendance marked to save');
-      return;
-    }
-
-    setSavingAttendance(true);
-    const toastId = toast.loading(`Saving ${rows.length} records...`);
-    try {
-      // Chunk in parallel for speed on large attendance batches
-      const CHUNK = 500;
-      const chunks: any[][] = [];
-      for (let i = 0; i < rows.length; i += CHUNK) chunks.push(rows.slice(i, i + CHUNK));
-
-      const results = await Promise.all(
-        chunks.map(chunk =>
-          (supabase as any)
-            .from('attendance')
-            .upsert(chunk, { onConflict: 'student_ref,course_id,date' })
-        )
-      );
-
-      const failed = results.find(r => r.error);
-      if (failed?.error) {
-        console.error('Save attendance error:', failed.error);
-        toast.error('Failed to save attendance', {
-          id: toastId,
-          description: failed.error.message || 'Please try again.',
-        });
-      } else {
-        toast.success(`Saved ${rows.length} attendance records`, { id: toastId });
-        await Promise.all([fetchAttendanceGrid(), fetchHistory()]);
-      }
-    } catch (err: any) {
-      console.error('Unexpected save error:', err);
-      toast.error('Failed to save attendance', {
-        id: toastId,
-        description: err?.message || 'Network error. Please try again.',
-      });
-    } finally {
-      setSavingAttendance(false);
-    }
+    await syncAttendanceToDatabase();
   };
-
-  const fetchAttendanceGrid = async () => {
-  if (!profile?.department_id || !selectedCourseId) { setGrid({}); return; }
-
-  const { data } = await supabase
-    .from('attendance')
-    .select('student_ref, date, status')
-    .eq('department_id', profile.department_id)
-    .eq('course_id', selectedCourseId);
-
-  if (!data) return;
-
-  const newGrid: any = {};
-
-  data.forEach((r: any) => {
-    const val = r.status === 'present' ? 'P' : 'A';
-
-    if (!newGrid[r.student_ref]) newGrid[r.student_ref] = {};
-    newGrid[r.student_ref][r.date] = val;
-  });
-
-  setGrid(newGrid);
-};
 
   const exportCSV = () => {
     if (students.length === 0) {
@@ -357,7 +570,8 @@ const DeptAdminDashboard = () => {
       return;
     }
 
-    const headers = ['S/N', 'Name', 'Gender', 'Matric No', 'Department', ...dateColumns];
+    const currentCourse = courses.find(c => c.id === selectedCourse);
+    const headers = ['S/N', 'Name', 'Gender', 'Matric No', 'Department', 'Course', ...dateColumns];
     const rows = students.map((s, i) => {
       const cells = [
         String(i + 1),
@@ -365,223 +579,156 @@ const DeptAdminDashboard = () => {
         s.gender || '',
         s.matric_no || '',
         departmentName,
+        currentCourse?.name || 'All Courses',
         ...dateColumns.map(d => grid[s.id]?.[d] || ''),
       ];
-      return cells.map(c => `"${c.replace(/"/g, '""')}"`).join(',');
+      return cells.map(c => `"${String(c).replace(/"/g, '""')}"`).join(',');
     });
 
-    const csv =  "\uFEFF" + [headers.join(','), ...rows].join('\n');
+    const csv = "\uFEFF" + [headers.join(','), ...rows].join('\n');
     const blob = new Blob([csv], { type: 'text/csv' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `attendance_${departmentName}_${dateColumns[0]}.csv`;
+    a.download = `attendance_${departmentName}_${currentCourse?.code || 'all'}_${dateColumns[0]}.csv`;
     a.click();
     URL.revokeObjectURL(url);
-    toast.success('CSV exported');
+    toast.success('CSV exported successfully');
   };
 
   const exportExcel = () => {
-  if (students.length === 0) {
-    toast.error('No students to export');
-    return;
-  }
+    if (students.length === 0) {
+      toast.error('No students to export');
+      return;
+    }
 
-  const data = students.map((s, i) => {
-    const row: any = {
-      "S/N": i + 1,
-      "Name": s.name,
-      "Gender": s.gender || '',
-      "Matric No": s.matric_no || '',
-      "Department": departmentName,
-    };
+    const currentCourse = courses.find(c => c.id === selectedCourse);
+    const data = students.map((s, i) => {
+      const row: any = {
+        "S/N": i + 1,
+        "Name": s.name,
+        "Gender": s.gender || '',
+        "Matric No": s.matric_no || '',
+        "Department": departmentName,
+        "Course": currentCourse?.name || 'All Courses',
+      };
 
-    dateColumns.forEach(d => {
-      const value = grid[s.id]?.[d] || '';
+      dateColumns.forEach(d => {
+        const value = grid[s.id]?.[d] || '';
+        row[d] = value === 'P' ? 'Present' : value === 'A' ? 'Absent' : '';
+      });
 
-      // optional: make it readable in Excel
-      row[d] = value === 'P' ? 'Present' : value === 'A' ? 'Absent' : '';
+      return row;
     });
 
-    return row;
-  });
+    const worksheet = XLSX.utils.json_to_sheet(data);
+    const cols = Object.keys(data[0]).map(key => ({
+      wch: Math.max(key.length, ...data.map(row => String(row[key] || '').length)) + 2
+    }));
+    worksheet['!cols'] = cols;
 
-  const worksheet = XLSX.utils.json_to_sheet(data);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Attendance");
+    XLSX.writeFile(workbook, `attendance_${departmentName}_${currentCourse?.code || 'all'}.xlsx`);
+    toast.success('Excel exported successfully');
+  };
 
-  // ✅ AUTO COLUMN WIDTH FIX
-  const cols = Object.keys(data[0]).map(key => ({
-    wch: Math.max(
-      key.length,
-      ...data.map(row => String(row[key] || '').length)
-    ) + 2
-  }));
-
-  worksheet['!cols'] = cols;
-
-  const workbook = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(workbook, worksheet, "Attendance");
-
-  XLSX.writeFile(workbook, `attendance_${departmentName}.xlsx`);
-
-  toast.success('Excel exported');
-};
-
-const generatePDF = (): jsPDF => {
-  const doc = new jsPDF();
-
-  // 🏫 HEADER
-  doc.setFontSize(16);
-  doc.text('ATTENDANCE REPORT', 105, 15, { align: 'center' });
-
-  doc.setFontSize(12);
-  doc.text(`Department: ${departmentName}`, 14, 25);
-  doc.text(`Date Generated: ${new Date().toLocaleDateString()}`, 14, 32);
-
-  // 📊 TABLE DATA
-  const tableData = history.map((a, i) => [
-  i + 1,
-  a.students?.name ?? 'Unknown',
-  a.students?.matric_no ?? '-',
-  a.students?.gender ?? '-',
-  a.date,
-  a.status,
-  ]);
-  // 📋 TABLE
-  autoTable(doc, {
-    startY: 40,
-    head: [['S/N', 'Student Name', 'Matric No', 'Gender', 'Date', 'Status']],
-    body: tableData,
-
-    styles: {
-      fontSize: 10,
-      cellPadding: 3,
-    },
-
-    headStyles: {
-      fillColor: [22, 160, 133], // green header
-      textColor: 255,
-    },
-
-    alternateRowStyles: {
-      fillColor: [240, 240, 240],
-    },
-
-    didParseCell: function (data) {
-      // 🎨 Color status column
-      if (data.column.index === 5) {
-        if (data.cell.raw === 'present') {
-          data.cell.styles.textColor = [0, 150, 0]; // green
+  const generatePDF = (): jsPDF => {
+    const doc = new jsPDF();
+    const currentCourse = courses.find(c => c.id === selectedCourse);
+    
+    doc.setFontSize(16);
+    doc.text('ATTENDANCE REPORT', 105, 15, { align: 'center' });
+    
+    doc.setFontSize(12);
+    doc.text(`Department: ${departmentName}`, 14, 25);
+    doc.text(`Course: ${currentCourse ? `${currentCourse.code} - ${currentCourse.name}` : 'All Courses'}`, 14, 32);
+    doc.text(`Date Generated: ${new Date().toLocaleDateString()}`, 14, 39);
+    
+    const filteredHistory = selectedCourse 
+      ? history.filter(r => r.course_id === selectedCourse)
+      : history;
+    
+    const tableData = filteredHistory.map((a, i) => [
+      i + 1,
+      a.students?.name ?? 'Unknown',
+      a.students?.matric_no ?? '-',
+      a.students?.gender ?? '-',
+      a.courses?.name ?? '-',
+      a.date,
+      a.status,
+    ]);
+    
+    autoTable(doc, {
+      startY: 48,
+      head: [['S/N', 'Student Name', 'Matric No', 'Gender', 'Course', 'Date', 'Status']],
+      body: tableData,
+      styles: { fontSize: 10, cellPadding: 3 },
+      headStyles: { fillColor: [22, 160, 133], textColor: 255 },
+      alternateRowStyles: { fillColor: [240, 240, 240] },
+      didParseCell: function (data) {
+        if (data.column.index === 6) {
+          if (data.cell.raw === 'present') data.cell.styles.textColor = [0, 150, 0];
+          if (data.cell.raw === 'absent') data.cell.styles.textColor = [200, 0, 0];
         }
-        if (data.cell.raw === 'absent') {
-          data.cell.styles.textColor = [200, 0, 0]; // red
-        }
-      }
-    },
-  });
-
-  // 📄 FOOTER + WATERMARK
-  const pageCount = doc.getNumberOfPages();
-  const pageWidth = doc.internal.pageSize.getWidth();
-  const pageHeight = doc.internal.pageSize.getHeight();
-
-  for (let i = 1; i <= pageCount; i++) {
-    doc.setPage(i);
-
-    // Watermark
-    doc.saveGraphicsState();
-    doc.setFontSize(60);
-    doc.setTextColor(200, 200, 200);
-    doc.setGState(new (doc as any).GState({ opacity: 0.25 }));
-    doc.text('Attendtrack', pageWidth / 2, pageHeight / 2, {
-      align: 'center',
-      angle: 45,
+      },
     });
-    doc.restoreGraphicsState();
 
-    // Page number
-    doc.setFontSize(10);
-    doc.setTextColor(0, 0, 0);
-    doc.text(
-      `Page ${i} of ${pageCount}`,
-      105,
-      290,
-      { align: 'center' }
-    );
-  }
+    const pageCount = doc.getNumberOfPages();
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const pageHeight = doc.internal.pageSize.getHeight();
 
-  return doc;
-};
+    for (let i = 1; i <= pageCount; i++) {
+      doc.setPage(i);
+      doc.saveGraphicsState();
+      doc.setFontSize(60);
+      doc.setTextColor(200, 200, 200);
+      doc.setGState(new (doc as any).GState({ opacity: 0.40 }));
+      doc.text('Attendtrack', pageWidth / 2, pageHeight / 2, { align: 'center', angle: 45 });
+      doc.restoreGraphicsState();
+      doc.setFontSize(10);
+      doc.setTextColor(0, 0, 0);
+      doc.text(`Page ${i} of ${pageCount}`, 105, 290, { align: 'center' });
+    }
 
-  const preparePDFForShare = () => {
-    if (history.length === 0) {
+    return doc;
+  };
+
+  const sharePDF = async () => {
+    const filteredHistory = selectedCourse 
+      ? history.filter(r => r.course_id === selectedCourse)
+      : history;
+      
+    if (filteredHistory.length === 0) {
       toast.error('No attendance history to share');
       return;
     }
-    if (pdfBlobUrl) URL.revokeObjectURL(pdfBlobUrl);
-    const doc = generatePDF();
-    const blob = doc.output('blob');
-    const url = URL.createObjectURL(blob);
-    setPdfBlobUrl(url);
-    setShowShareDialog(true);
-  };
 
-  const shareViaNative = async () => {
-    if (!pdfBlobUrl) return;
-    const blob = await fetch(pdfBlobUrl).then(r => r.blob());
-    const file = new File([blob], `attendance_${departmentName}.pdf`, { type: 'application/pdf' });
-    if (navigator.share) {
-      try {
-        const canShare = navigator.canShare?.({ files: [file] });
-        if (canShare) {
-          await navigator.share({
-            title: 'Attendance Report',
-            text: `Attendance report for ${departmentName}`,
-            files: [file],
-          });
-          setShowShareDialog(false);
-          return;
-        }
-      } catch (err: any) {
-        if (err?.name === 'AbortError') return;
+    try {
+      const doc = generatePDF();
+      const pdfBlob = doc.output('blob');
+      const currentCourse = courses.find(c => c.id === selectedCourse);
+      const fileName = `attendance_${departmentName}_${currentCourse?.code || 'all'}.pdf`;
+      const file = new File([pdfBlob], fileName, { type: 'application/pdf' });
+
+      if (navigator.share) {
+        await navigator.share({
+          title: 'Attendance Report',
+          text: `Attendance report for ${departmentName}${currentCourse ? ` - ${currentCourse.name}` : ''}`,
+          files: [file],
+        });
+        toast.success('PDF shared successfully');
+      } else {
+        doc.save(fileName);
+        toast.success('PDF downloaded');
+      }
+    } catch (error: any) {
+      if (error?.name !== 'AbortError') {
+        console.error('Share error:', error);
+        toast.error('Failed to share PDF');
       }
     }
-    toast.error('Native sharing not supported on this device');
   };
-
-  const downloadPDF = () => {
-    if (!pdfBlobUrl) return;
-    const a = document.createElement('a');
-    a.href = pdfBlobUrl;
-    a.download = `attendance_${departmentName}.pdf`;
-    a.click();
-    toast.success('PDF downloaded');
-  };
-
-  const shareViaWhatsApp = () => {
-    if (!pdfBlobUrl) return;
-    downloadPDF();
-    const text = encodeURIComponent(`Attendance Report - ${departmentName}\n(PDF attached separately)`);
-    window.open(`https://wa.me/?text=${text}`, '_blank');
-    setShowShareDialog(false);
-  };
-
-  const shareViaTelegram = () => {
-    if (!pdfBlobUrl) return;
-    downloadPDF();
-    const text = encodeURIComponent(`Attendance Report - ${departmentName}`);
-    window.open(`https://t.me/share/url?url=${text}`, '_blank');
-    setShowShareDialog(false);
-  };
-
-  const shareViaEmail = () => {
-    if (!pdfBlobUrl) return;
-    downloadPDF();
-    const subject = encodeURIComponent(`Attendance Report - ${departmentName}`);
-    const body = encodeURIComponent(`Please find the attendance report for ${departmentName} attached.\n\nGenerated on ${new Date().toLocaleDateString()}`);
-    window.open(`mailto:?subject=${subject}&body=${body}`, '_self');
-    setShowShareDialog(false);
-  };
-
 
   const updateStudentField = (id: string, field: string, value: string) => {
     setStudentEdits(prev => ({
@@ -610,7 +757,7 @@ const generatePDF = (): jsPDF => {
     }
 
     if (!hasError) {
-      toast.success('Student details saved');
+      toast.success('Student details saved successfully');
       setStudentEdits({});
       fetchStudents();
     }
@@ -625,32 +772,38 @@ const generatePDF = (): jsPDF => {
     if (!profile?.department_id) return;
     setAddingStudent(true);
 
-    const { error } = await (supabase as any).from('students').insert({
-      name: newStudent.name.trim(),
-      gender: newStudent.gender || null,
-      matric_no: newStudent.matric_no.trim() || null,
-      department_id: profile.department_id,
-    });
+    try {
+      const { error } = await (supabase as any).from('students').insert({
+        name: newStudent.name.trim(),
+        gender: newStudent.gender || null,
+        matric_no: newStudent.matric_no.trim() || null,
+        department_id: profile.department_id,
+      });
 
-    if (error) {
-      toast.error(error.message);
-    } else {
-      toast.success('Student added');
+      if (error) throw error;
+
+      toast.success('Student added successfully');
       setNewStudent({ name: '', gender: '', matric_no: '' });
       setShowAddDialog(false);
-      fetchStudents();
+      await fetchStudents();
+    } catch (error: any) {
+      toast.error(`Failed to add student: ${error.message}`);
+    } finally {
+      setAddingStudent(false);
     }
-    setAddingStudent(false);
   };
 
   const deleteStudent = async (id: string, name: string) => {
-    if (!confirm(`Delete student "${name}"? This cannot be undone.`)) return;
-    const { error } = await (supabase as any).from('students').delete().eq('id', id);
-    if (error) {
-      toast.error(error.message);
-    } else {
-      toast.success('Student deleted');
-      fetchStudents();
+    if (!confirm(`Delete student "${name}"? This will also delete their attendance records. This cannot be undone.`)) return;
+    
+    try {
+      const { error } = await (supabase as any).from('students').delete().eq('id', id);
+      if (error) throw error;
+      
+      toast.success('Student deleted successfully');
+      await fetchStudents();
+    } catch (error: any) {
+      toast.error(`Failed to delete student: ${error.message}`);
     }
   };
 
@@ -696,43 +849,50 @@ const generatePDF = (): jsPDF => {
       }
 
       const { error } = await (supabase as any).from('students').insert(csvRows);
-      if (error) {
-        toast.error(error.message);
-      } else {
-        toast.success(`Imported ${csvRows.length} students`);
-        fetchStudents();
-      }
-    } catch {
-      toast.error('Failed to parse CSV file');
+      if (error) throw error;
+      
+      toast.success(`Successfully imported ${csvRows.length} students`);
+      await fetchStudents();
+    } catch (error: any) {
+      toast.error(`Import failed: ${error.message}`);
+    } finally {
+      setImporting(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
     }
-
-    if (fileInputRef.current) fileInputRef.current.value = '';
-    setImporting(false);
   };
 
   const deleteAllHistory = async () => {
-    if (!confirm('Are you sure you want to delete ALL attendance history? This cannot be undone.')) return;
+    if (!confirm('⚠️ WARNING: This will delete ALL attendance history for your department. This action cannot be undone. Are you absolutely sure?')) return;
     if (!profile?.department_id) return;
+    
     setDeletingHistory(true);
-    const { error } = await (supabase as any)
-      .from('attendance')
-      .delete()
-      .eq('department_id', profile.department_id);
-    if (error) {
-      toast.error(error.message);
-    } else {
+    try {
+      const { error } = await (supabase as any)
+        .from('attendance')
+        .delete()
+        .eq('department_id', profile.department_id);
+      
+      if (error) throw error;
+      
       toast.success('All attendance history deleted');
       setHistory([]);
       setGrid({});
+      clearLocalAttendance();
+    } catch (error: any) {
+      toast.error(`Failed to delete history: ${error.message}`);
+    } finally {
+      setDeletingHistory(false);
     }
-    setDeletingHistory(false);
   };
 
-  // Compute attendance percentages per student
   const studentStats = useMemo(() => {
     const month = new Date().toISOString().slice(0, 7);
+    const filteredHistoryForStats = selectedCourse 
+      ? history.filter(r => r.course_id === selectedCourse)
+      : history;
+      
     return students.map(student => {
-      const records = history.filter(
+      const records = filteredHistoryForStats.filter(
         r => r.student_ref === student.id && r.date.startsWith(month)
       );
       const total = records.length;
@@ -740,9 +900,8 @@ const generatePDF = (): jsPDF => {
       const percent = total ? (present / total) * 100 : 0;
       return { ...student, present, total, percent };
     });
-  }, [students, history]);
+  }, [students, history, selectedCourse]);
 
-  // Filtered students for history tab
   const filteredStats = useMemo(() => {
     let result = studentStats;
     if (searchQuery.trim()) {
@@ -760,13 +919,23 @@ const generatePDF = (): jsPDF => {
     return result;
   }, [studentStats, searchQuery, filterPercent]);
 
+  const filteredHistory = useMemo(() => {
+    if (!selectedCourse) return history;
+    return history.filter(r => r.course_id === selectedCourse);
+  }, [history, selectedCourse]);
+
+  const pendingSyncCount = localAttendance.filter(item => !item.synced).length;
+  const failedSyncCount = localAttendance.filter(item => item.error && !item.synced).length;
+
   if (!profile?.department_id) {
     return (
       <DashboardLayout>
         <div className="flex items-center justify-center min-h-[60vh]">
           <Card className="max-w-md">
             <CardContent className="pt-6 text-center">
-              <p className="text-muted-foreground">You haven't been assigned to a department yet. Please contact a super admin.</p>
+              <AlertCircle className="w-12 h-12 text-yellow-500 mx-auto mb-4" />
+              <p className="text-muted-foreground">You haven't been assigned to a department yet.</p>
+              <p className="text-sm text-muted-foreground mt-2">Please contact a super administrator to assign you to a department.</p>
             </CardContent>
           </Card>
         </div>
@@ -775,14 +944,14 @@ const generatePDF = (): jsPDF => {
   }
 
   const statusStyles: Record<string, string> = {
-    present: 'bg-success text-success-foreground',
-    absent: 'bg-destructive text-destructive-foreground',
+    present: 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200',
+    absent: 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200',
   };
 
   const cellStyles: Record<string, string> = {
     P: 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200',
     A: 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200',
-    '': 'bg-muted text-muted-foreground',
+    '': 'bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400',
   };
 
   const tabs = [
@@ -798,12 +967,98 @@ const generatePDF = (): jsPDF => {
   return (
     <DashboardLayout>
       <div className="space-y-6">
-        <div>
-          <h2 className="text-2xl font-heading font-bold">Department Admin</h2>
-          <p className="text-muted-foreground text-sm mt-1">
-            Department: <span className="font-semibold text-foreground">{departmentName || 'Loading...'}</span>
-          </p>
+        <div className="flex justify-between items-start">
+          <div>
+            <h2 className="text-2xl font-bold">Department Admin Dashboard</h2>
+            <p className="text-muted-foreground text-sm mt-1">
+              Department: <span className="font-semibold text-foreground">{departmentName}</span>
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            {connectionStatus === 'online' ? (
+              <Badge className="bg-green-100 text-green-800">
+                <Check className="w-3 h-3 mr-1" /> Online
+              </Badge>
+            ) : connectionStatus === 'offline' ? (
+              <Badge className="bg-red-100 text-red-800">
+                <WifiOff className="w-3 h-3 mr-1" /> Offline
+              </Badge>
+            ) : (
+              <Badge variant="outline">
+                <Loader2 className="w-3 h-3 mr-1 animate-spin" /> Checking
+              </Badge>
+            )}
+          </div>
         </div>
+
+        <Card>
+          <CardHeader>
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+              <div>
+                <CardTitle className="text-lg flex items-center gap-2">
+                  <BookOpen className="w-5 h-5" /> Courses / Subjects
+                </CardTitle>
+                <p className="text-sm text-muted-foreground">Add courses like PHY 101, CHM 101 to mark attendance separately</p>
+              </div>
+              <Dialog open={showCourseDialog} onOpenChange={setShowCourseDialog}>
+                <DialogTrigger asChild>
+                  <Button size="sm"><Plus className="w-4 h-4 mr-1" /> Add Course</Button>
+                </DialogTrigger>
+                <DialogContent>
+                  <DialogHeader><DialogTitle>Add New Course</DialogTitle></DialogHeader>
+                  <div className="space-y-4 pt-2">
+                    <div>
+                      <label className="text-sm font-medium">Course Code *</label>
+                      <Input 
+                        value={newCourse.code} 
+                        onChange={e => setNewCourse(p => ({ ...p, code: e.target.value }))} 
+                        placeholder="e.g., PHY 101, CHM 101" 
+                      />
+                    </div>
+                    <div>
+                      <label className="text-sm font-medium">Course Name *</label>
+                      <Input 
+                        value={newCourse.name} 
+                        onChange={e => setNewCourse(p => ({ ...p, name: e.target.value }))} 
+                        placeholder="e.g., General Physics, Organic Chemistry" 
+                      />
+                    </div>
+                    <Button onClick={addCourse} disabled={addingCourse} className="w-full">
+                      {addingCourse ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Plus className="w-4 h-4 mr-2" />}
+                      {addingCourse ? 'Adding...' : 'Add Course'}
+                    </Button>
+                  </div>
+                </DialogContent>
+              </Dialog>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <div className="flex flex-wrap gap-2">
+              <Button
+                variant={!selectedCourse ? 'default' : 'outline'}
+                size="sm"
+                onClick={() => setSelectedCourse('')}
+                className="mb-2"
+              >
+                All Courses
+              </Button>
+              {courses.map(course => (
+                <Button
+                  key={course.id}
+                  variant={selectedCourse === course.id ? 'default' : 'outline'}
+                  size="sm"
+                  onClick={() => setSelectedCourse(course.id)}
+                  className="mb-2"
+                >
+                  {course.code}
+                </Button>
+              ))}
+              {courses.length === 0 && (
+                <p className="text-muted-foreground text-sm">No courses added yet. Click "Add Course" to create one.</p>
+              )}
+            </div>
+          </CardContent>
+        </Card>
 
         <div className="flex gap-2 border-b">
           {tabs.map(tab => (
@@ -825,7 +1080,14 @@ const generatePDF = (): jsPDF => {
               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                 <div>
                   <CardTitle className="text-lg">Mark Attendance</CardTitle>
-                  <p className="text-sm text-muted-foreground mt-0.5">Department: {departmentName}</p>
+                  <p className="text-sm text-muted-foreground mt-0.5">
+                    Department: {departmentName}
+                    {selectedCourse && courses.find(c => c.id === selectedCourse) && (
+                      <span className="ml-2 font-semibold">
+                        | Course: {courses.find(c => c.id === selectedCourse)?.code} - {courses.find(c => c.id === selectedCourse)?.name}
+                      </span>
+                    )}
+                  </p>
                 </div>
                 <div className="flex items-center gap-2 flex-wrap">
                   <Button variant="outline" size="sm" onClick={addDateColumn}>
@@ -834,57 +1096,65 @@ const generatePDF = (): jsPDF => {
                   <Button variant="outline" onClick={exportCSV} disabled={students.length === 0}>
                     <Download className="w-4 h-4 mr-1" /> Export CSV
                   </Button>
-                  <Button variant="outline" onClick={exportExcel}>
-                  <Download className="w-4 h-4 mr-1" /> Excel
+                  <Button variant="outline" onClick={exportExcel} disabled={students.length === 0}>
+                    <Download className="w-4 h-4 mr-1" /> Excel
                   </Button>
-                  <Button onClick={preparePDFForShare}>
-                    <Share2 className="w-4 h-4 mr-1" /> Share PDF
+                  <Button onClick={sharePDF} disabled={history.length === 0}>
+                    <Download className="w-4 h-4 mr-1" /> Share PDF
                   </Button>
-                  <Button onClick={saveAttendance} disabled={savingAttendance || students.length === 0}>
-                    <Save className="w-4 h-4 mr-1" /> {savingAttendance ? 'Saving...' : 'Save Attendance'}
+                  <Button 
+                    onClick={saveAttendance} 
+                    disabled={syncingAttendance || pendingSyncCount === 0 || connectionStatus === 'offline'}
+                    variant={pendingSyncCount > 0 ? 'default' : 'outline'}
+                  >
+                    {syncingAttendance ? (
+                      <Loader2 className="w-4 h-4 mr-1 animate-spin" />
+                    ) : (
+                      <Save className="w-4 h-4 mr-1" />
+                    )}
+                    {syncingAttendance ? 'Syncing...' : `Save All (${pendingSyncCount})`}
                   </Button>
+                  {failedSyncCount > 0 && (
+                    <Button onClick={syncAttendanceToDatabase} variant="destructive" size="sm">
+                      <RefreshCw className="w-4 h-4 mr-1" /> Retry Failed ({failedSyncCount})
+                    </Button>
+                  )}
                 </div>
               </div>
-              <div className="flex items-center gap-2 mt-3 flex-wrap">
-                <span className="text-sm font-medium">Course:</span>
-                <Select value={selectedCourseId} onValueChange={setSelectedCourseId}>
-                  <SelectTrigger className="w-[260px] h-9">
-                    <SelectValue placeholder="Select a course" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {courses.map(c => (
-                      <SelectItem key={c.id} value={c.id}>{c.code} — {c.name}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <Dialog open={showAddCourseDialog} onOpenChange={setShowAddCourseDialog}>
-                  <DialogTrigger asChild>
-                    <Button variant="outline" size="sm"><Plus className="w-4 h-4 mr-1" /> New Course</Button>
-                  </DialogTrigger>
-                  <DialogContent>
-                    <DialogHeader><DialogTitle>Add New Course</DialogTitle></DialogHeader>
-                    <div className="space-y-4 pt-2">
-                      <div>
-                        <label className="text-sm font-medium">Code *</label>
-                        <Input value={newCourse.code} onChange={e => setNewCourse(p => ({ ...p, code: e.target.value }))} placeholder="e.g. MTH101" />
-                      </div>
-                      <div>
-                        <label className="text-sm font-medium">Name *</label>
-                        <Input value={newCourse.name} onChange={e => setNewCourse(p => ({ ...p, name: e.target.value }))} placeholder="Course title" />
-                      </div>
-                      <Button onClick={addCourse} disabled={addingCourse} className="w-full">
-                        {addingCourse ? 'Adding...' : 'Add Course'}
-                      </Button>
-                    </div>
-                  </DialogContent>
-                </Dialog>
-              </div>
+              
+              {pendingSyncCount > 0 && (
+                <Badge className="mt-2 bg-yellow-100 text-yellow-800">
+                  <Database className="w-3 h-3 mr-1" />
+                  {pendingSyncCount} unsynced record{pendingSyncCount !== 1 ? 's' : ''}
+                </Badge>
+              )}
+              
+              {failedSyncCount > 0 && (
+                <Badge className="mt-2 bg-red-100 text-red-800 ml-2">
+                  <AlertCircle className="w-3 h-3 mr-1" />
+                  {failedSyncCount} failed record{failedSyncCount !== 1 ? 's' : ''}
+                </Badge>
+              )}
+              
+              {connectionStatus === 'offline' && (
+                <Badge className="mt-2 bg-red-100 text-red-800">
+                  <WifiOff className="w-3 h-3 mr-1" />
+                  You are offline. Changes will be saved locally and synced when you reconnect.
+                </Badge>
+              )}
+              
               <p className="text-xs text-muted-foreground mt-2">Click a cell to toggle: empty → <Check className="inline w-3 h-3 text-green-600" /> (Present) → <X className="inline w-3 h-3 text-red-600" /> (Absent) → empty</p>
-              <p className="text-xs text-muted-foreground">Attendance is saved per course. The same student/date for the same course cannot be duplicated.</p>
+              <p className="text-xs text-muted-foreground">Changes are saved locally and will be synced when you click "Save All"</p>
             </CardHeader>
             <CardContent>
               {students.length === 0 ? (
-                <p className="text-muted-foreground text-center py-8">No students yet. Go to the Students tab to add some.</p>
+                <div className="text-center py-8">
+                  <Users className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
+                  <p className="text-muted-foreground">No students yet.</p>
+                  <Button variant="link" onClick={() => setActiveTab('students')} className="mt-2">
+                    Go to Students tab to add some
+                  </Button>
+                </div>
               ) : (
                 <div className="overflow-x-auto">
                   <Table>
@@ -910,14 +1180,14 @@ const generatePDF = (): jsPDF => {
                                   className="text-[10px] px-1.5 py-0.5 rounded bg-green-100 text-green-700 hover:bg-green-200 dark:bg-green-900 dark:text-green-300 dark:hover:bg-green-800 flex items-center gap-0.5"
                                   title="Mark all present"
                                 >
-                                  <CheckCheck className="w-3 h-3" /> All
+                                  <CheckCheck className="w-3 h-3" /> All P
                                 </button>
                                 <button
                                   onClick={() => markAllForDate(date, 'A')}
                                   className="text-[10px] px-1.5 py-0.5 rounded bg-red-100 text-red-700 hover:bg-red-200 dark:bg-red-900 dark:text-red-300 dark:hover:bg-red-800 flex items-center gap-0.5"
                                   title="Mark all absent"
                                 >
-                                  <XCircle className="w-3 h-3" /> All
+                                  <XCircle className="w-3 h-3" /> All A
                                 </button>
                               </div>
                               {dateColumns.length > 1 && (
@@ -941,13 +1211,26 @@ const generatePDF = (): jsPDF => {
                           <TableCell className="text-sm">{departmentName}</TableCell>
                           {dateColumns.map((date, i) => {
                             const val = grid[student.id]?.[date] || '';
+                            const isPending = localAttendance.some(
+                              item => item.studentId === student.id && item.date === date && !item.synced
+                            );
+                            const hasError = localAttendance.some(
+                              item => item.studentId === student.id && item.date === date && item.error
+                            );
                             return (
                               <TableCell key={i} className="text-center p-1">
                                 <button
                                   onClick={() => toggleCell(student.id, date)}
-                                  className={`w-full h-8 rounded text-xs font-bold transition-colors flex items-center justify-center ${cellStyles[val]}`}
+                                  className={`w-full h-8 rounded text-xs font-bold transition-colors flex items-center justify-center relative ${cellStyles[val]}`}
+                                  disabled={connectionStatus === 'offline' && !isPending}
                                 >
                                   {val === 'P' ? <Check className="w-4 h-4" /> : val === 'A' ? <X className="w-4 h-4" /> : '—'}
+                                  {isPending && !hasError && (
+                                    <span className="absolute -top-1 -right-1 w-2 h-2 bg-yellow-500 rounded-full animate-pulse"></span>
+                                  )}
+                                  {hasError && (
+                                    <span className="absolute -top-1 -right-1 w-2 h-2 bg-red-500 rounded-full"></span>
+                                  )}
                                 </button>
                               </TableCell>
                             );
@@ -971,7 +1254,8 @@ const generatePDF = (): jsPDF => {
                 <div className="flex items-center gap-2">
                   <input ref={fileInputRef} type="file" accept=".csv" onChange={handleCSVImport} className="hidden" />
                   <Button variant="outline" onClick={() => fileInputRef.current?.click()} disabled={importing}>
-                    <Upload className="w-4 h-4 mr-1" /> {importing ? 'Importing...' : 'Import CSV'}
+                    {importing ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <Upload className="w-4 h-4 mr-1" />}
+                    {importing ? 'Importing...' : 'Import CSV'}
                   </Button>
                   <Dialog open={showAddDialog} onOpenChange={setShowAddDialog}>
                     <DialogTrigger asChild>
@@ -996,9 +1280,10 @@ const generatePDF = (): jsPDF => {
                         </div>
                         <div>
                           <label className="text-sm font-medium">Matric No</label>
-                          <Input value={newStudent.matric_no} onChange={e => setNewStudent(p => ({ ...p, matric_no: e.target.value }))} placeholder="e.g. MAT/2024/001" />
+                          <Input value={newStudent.matric_no} onChange={e => setNewStudent(p => ({ ...p, matric_no: e.target.value }))} placeholder="e.g., MAT/2024/001" />
                         </div>
                         <Button onClick={addStudent} disabled={addingStudent} className="w-full">
+                          {addingStudent ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Plus className="w-4 h-4 mr-2" />}
                           {addingStudent ? 'Adding...' : 'Add Student'}
                         </Button>
                       </div>
@@ -1006,6 +1291,7 @@ const generatePDF = (): jsPDF => {
                   </Dialog>
                   {Object.keys(studentEdits).length > 0 && (
                     <Button onClick={saveStudentDetails} disabled={savingStudents}>
+                      {savingStudents ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <Save className="w-4 h-4 mr-1" />}
                       Save Changes
                     </Button>
                   )}
@@ -1015,7 +1301,11 @@ const generatePDF = (): jsPDF => {
             </CardHeader>
             <CardContent>
               {students.length === 0 ? (
-                <p className="text-muted-foreground text-center py-8">No students yet. Add them manually or import a CSV.</p>
+                <div className="text-center py-8">
+                  <Users className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
+                  <p className="text-muted-foreground">No students yet.</p>
+                  <p className="text-sm text-muted-foreground mt-1">Add them manually or import a CSV file.</p>
+                </div>
               ) : (
                 <div className="overflow-x-auto">
                   <Table>
@@ -1045,7 +1335,7 @@ const generatePDF = (): jsPDF => {
                               </Select>
                             </TableCell>
                             <TableCell>
-                              <Input value={edits.matric_no ?? student.matric_no ?? ''} onChange={(e) => updateStudentField(student.id, 'matric_no', e.target.value)} placeholder="e.g. MAT/2024/001" className="min-w-[160px]" />
+                              <Input value={edits.matric_no ?? student.matric_no ?? ''} onChange={(e) => updateStudentField(student.id, 'matric_no', e.target.value)} placeholder="e.g., MAT/2024/001" className="min-w-[160px]" />
                             </TableCell>
                             <TableCell>
                               <Button variant="ghost" size="icon" onClick={() => deleteStudent(student.id, student.name)} className="text-destructive hover:text-destructive">
@@ -1074,7 +1364,8 @@ const generatePDF = (): jsPDF => {
                   onClick={deleteAllHistory}
                   disabled={deletingHistory || history.length === 0}
                 >
-                  <Trash2 className="w-4 h-4 mr-1" /> {deletingHistory ? 'Deleting...' : 'Delete All History'}
+                  {deletingHistory ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <Trash2 className="w-4 h-4 mr-1" />}
+                  {deletingHistory ? 'Deleting...' : 'Delete All History'}
                 </Button>
               </div>
               <div className="flex flex-col sm:flex-row gap-2 mt-3">
@@ -1101,16 +1392,16 @@ const generatePDF = (): jsPDF => {
             </CardHeader>
             <CardContent>
               <div className="mb-4 grid grid-cols-2 md:grid-cols-3 gap-3">
-                {filteredStats.map(student => (
+                {filteredStats.slice(0, 12).map(student => (
                   <div key={student.id} className="p-3 rounded-lg border bg-muted/30">
-                    <p className="font-medium text-sm">{student.name}</p>
+                    <p className="font-medium text-sm truncate" title={student.name}>{student.name}</p>
                     {student.matric_no && (
                       <p className="text-xs text-muted-foreground">{student.matric_no}</p>
                     )}
-                    <p className="text-xs text-muted-foreground">
+                    <p className="text-xs text-muted-foreground mt-1">
                       Present: {student.present} / {student.total}
                     </p>
-                    <p className={`text-sm font-bold ${student.percent >= 75 ? 'text-green-600' : 'text-red-500'}`}>
+                    <p className={`text-sm font-bold mt-1 ${student.percent >= 75 ? 'text-green-600' : 'text-red-500'}`}>
                       {student.percent.toFixed(1)}%
                     </p>
                   </div>
@@ -1127,12 +1418,13 @@ const generatePDF = (): jsPDF => {
                       <TableHead>Student</TableHead>
                       <TableHead>Matric No</TableHead>
                       <TableHead>Gender</TableHead>
+                      <TableHead>Course</TableHead>
                       <TableHead>Date</TableHead>
                       <TableHead>Status</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {history
+                    {filteredHistory
                       .filter(r => {
                         if (!searchQuery.trim()) return true;
                         const q = searchQuery.toLowerCase();
@@ -1141,23 +1433,33 @@ const generatePDF = (): jsPDF => {
                           (r.students?.matric_no?.toLowerCase().includes(q))
                         );
                       })
+                      .slice(0, 100)
                       .map((r, idx) => (
-                      <TableRow key={r.id}>
-                        <TableCell className="text-center font-medium">{idx + 1}</TableCell>
-                        <TableCell>{r.students?.name ?? 'Unknown'}</TableCell>
-                        <TableCell>{r.students?.matric_no ?? '-'}</TableCell>
-                        <TableCell>{r.students?.gender ?? '-'}</TableCell>
-                        <TableCell>{r.date}</TableCell>
-                        <TableCell>
-                          <span className={`text-xs px-2 py-0.5 rounded-full font-medium capitalize ${statusStyles[r.status] || 'bg-muted'}`}>
-                            {r.status}
-                          </span>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                    {history.length === 0 && (
+                        <TableRow key={r.id}>
+                          <TableCell className="text-center font-medium">{idx + 1}</TableCell>
+                          <TableCell className="max-w-[200px] truncate" title={r.students?.name ?? 'Unknown'}>
+                            {r.students?.name ?? 'Unknown'}
+                          </TableCell>
+                          <TableCell>{r.students?.matric_no ?? '-'}</TableCell>
+                          <TableCell>{r.students?.gender ?? '-'}</TableCell>
+                          <TableCell>
+                            <Badge variant="outline">
+                              {r.courses?.code || '-'}
+                            </Badge>
+                          </TableCell>
+                          <TableCell>{r.date}</TableCell>
+                          <TableCell>
+                            <span className={`text-xs px-2 py-0.5 rounded-full font-medium capitalize ${statusStyles[r.status] || 'bg-muted'}`}>
+                              {r.status}
+                            </span>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    {filteredHistory.length === 0 && (
                       <TableRow>
-                        <TableCell colSpan={6} className="text-center text-muted-foreground">No records yet</TableCell>
+                        <TableCell colSpan={7} className="text-center text-muted-foreground py-8">
+                          No attendance records yet. Start marking attendance!
+                        </TableCell>
                       </TableRow>
                     )}
                   </TableBody>
@@ -1167,40 +1469,6 @@ const generatePDF = (): jsPDF => {
           </Card>
         )}
       </div>
-      <Dialog open={showShareDialog} onOpenChange={(open) => {
-        setShowShareDialog(open);
-        if (!open && pdfBlobUrl) {
-          URL.revokeObjectURL(pdfBlobUrl);
-          setPdfBlobUrl(null);
-        }
-      }}>
-        <DialogContent className="max-w-sm">
-          <DialogHeader>
-            <DialogTitle>Share Attendance PDF</DialogTitle>
-          </DialogHeader>
-          <div className="grid grid-cols-2 gap-3 pt-2">
-            <Button variant="outline" className="flex flex-col items-center gap-2 h-auto py-4 border-green-500/30 hover:bg-green-500/10" onClick={shareViaWhatsApp}>
-              <MessageCircle className="w-6 h-6 text-green-500" />
-              <span className="text-xs">WhatsApp</span>
-            </Button>
-            <Button variant="outline" className="flex flex-col items-center gap-2 h-auto py-4 border-blue-500/30 hover:bg-blue-500/10" onClick={shareViaTelegram}>
-              <Send className="w-6 h-6 text-blue-500" />
-              <span className="text-xs">Telegram</span>
-            </Button>
-            <Button variant="outline" className="flex flex-col items-center gap-2 h-auto py-4 border-red-500/30 hover:bg-red-500/10" onClick={shareViaEmail}>
-              <Mail className="w-6 h-6 text-red-500" />
-              <span className="text-xs">Email</span>
-            </Button>
-            <Button variant="outline" className="flex flex-col items-center gap-2 h-auto py-4 border-purple-500/30 hover:bg-purple-500/10" onClick={shareViaNative}>
-              <Smartphone className="w-6 h-6 text-purple-500" />
-              <span className="text-xs">More Apps</span>
-            </Button>
-          </div>
-          <Button variant="secondary" className="w-full mt-2" onClick={() => { downloadPDF(); setShowShareDialog(false); }}>
-            <Download className="w-4 h-4 mr-2" /> Download PDF
-          </Button>
-        </DialogContent>
-      </Dialog>
     </DashboardLayout>
   );
 };
