@@ -1146,6 +1146,32 @@ const DeptAdminDashboard = () => {
                   <Button onClick={sharePDF} disabled={history.length === 0}>
                     <Download className="w-4 h-4 mr-1" /> Share PDF
                   </Button>
+                  <Dialog open={showShareDialog} onOpenChange={setShowShareDialog}>
+                    <DialogContent>
+                      <DialogHeader><DialogTitle>Share Attendance PDF</DialogTitle></DialogHeader>
+                      <div className="space-y-2 pt-2">
+                        <p className="text-sm text-muted-foreground">{shareFileName}</p>
+                        <Button className="w-full" onClick={downloadPDF}>
+                          <Download className="w-4 h-4 mr-2" /> Download PDF
+                        </Button>
+                        <Button variant="outline" className="w-full" onClick={shareViaNative}>
+                          Share via device (if supported)
+                        </Button>
+                        <Button variant="outline" className="w-full" onClick={shareViaWhatsApp}>
+                          WhatsApp (downloads PDF + opens chat)
+                        </Button>
+                        <Button variant="outline" className="w-full" onClick={shareViaTelegram}>
+                          Telegram (downloads PDF + opens chat)
+                        </Button>
+                        <Button variant="outline" className="w-full" onClick={shareViaEmail}>
+                          Email (downloads PDF + opens mail)
+                        </Button>
+                        <p className="text-xs text-muted-foreground pt-2">
+                          Tip: native sharing is blocked inside the preview iframe. Open the published app on your phone for one-tap sharing, or download here and attach manually.
+                        </p>
+                      </div>
+                    </DialogContent>
+                  </Dialog>
                   <Button 
                     onClick={saveAttendance} 
                     disabled={syncingAttendance || pendingSyncCount === 0 || connectionStatus === 'offline'}
