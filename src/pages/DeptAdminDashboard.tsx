@@ -85,6 +85,11 @@ const DeptAdminDashboard = () => {
   const [newCourse, setNewCourse] = useState({ name: '', code: '' });
   const [addingCourse, setAddingCourse] = useState(false);
 
+  const [showShareDialog, setShowShareDialog] = useState(false);
+  const [shareFileName, setShareFileName] = useState('');
+  const [shareMessage, setShareMessage] = useState('');
+  const pdfBlobRef = useRef<Blob | null>(null);
+
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [importing, setImporting] = useState(false);
   const [initialLoading, setInitialLoading] = useState(true);
