@@ -85,6 +85,11 @@ const DeptAdminDashboard = () => {
   const [newCourse, setNewCourse] = useState({ name: '', code: '' });
   const [addingCourse, setAddingCourse] = useState(false);
 
+  const [showShareDialog, setShowShareDialog] = useState(false);
+  const [shareFileName, setShareFileName] = useState('');
+  const [shareMessage, setShareMessage] = useState('');
+  const pdfBlobRef = useRef<Blob | null>(null);
+
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [importing, setImporting] = useState(false);
   const [initialLoading, setInitialLoading] = useState(true);
@@ -696,10 +701,10 @@ const DeptAdminDashboard = () => {
   };
 
   const sharePDF = async () => {
-    const filteredHistory = selectedCourse 
+    const filteredHistory = selectedCourse
       ? history.filter(r => r.course_id === selectedCourse)
       : history;
-      
+
     if (filteredHistory.length === 0) {
       toast.error('No attendance history to share');
       return;
@@ -710,38 +715,63 @@ const DeptAdminDashboard = () => {
       const pdfBlob = doc.output('blob');
       const currentCourse = courses.find(c => c.id === selectedCourse);
       const fileName = `attendance_${departmentName}_${currentCourse?.code || 'all'}.pdf`;
-      const file = new File([pdfBlob], fileName, { type: 'application/pdf' });
+      const message = `Attendance report for ${departmentName}${currentCourse ? ` - ${currentCourse.name}` : ''}`;
 
-      const shareData = {
-        title: 'Attendance Report',
-        text: `Attendance report for ${departmentName}${currentCourse ? ` - ${currentCourse.name}` : ''}`,
-        files: [file],
-      };
-
-      const canShareFiles = typeof navigator !== 'undefined'
-        && typeof navigator.canShare === 'function'
-        && navigator.canShare(shareData);
-
-      if (canShareFiles) {
-        try {
-          await navigator.share(shareData);
-          toast.success('PDF shared successfully');
-          return;
-        } catch (err: any) {
-          if (err?.name === 'AbortError') return;
-          // Permission denied (e.g. inside iframe) — fall through to download
-          console.warn('Native share unavailable, falling back to download:', err);
-        }
-      }
-
-      doc.save(fileName);
-      toast.success('PDF downloaded');
+      pdfBlobRef.current = pdfBlob;
+      setShareFileName(fileName);
+      setShareMessage(message);
+      setShowShareDialog(true);
     } catch (error: any) {
-      if (error?.name !== 'AbortError') {
-        console.error('Share error:', error);
-        toast.error('Failed to share PDF');
-      }
+      console.error('Share error:', error);
+      toast.error('Failed to prepare PDF');
     }
+  };
+
+  const downloadPDF = () => {
+    if (!pdfBlobRef.current) return;
+    const url = URL.createObjectURL(pdfBlobRef.current);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = shareFileName;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    toast.success('PDF downloaded');
+  };
+
+  const shareViaNative = async () => {
+    if (!pdfBlobRef.current) return;
+    try {
+      const file = new File([pdfBlobRef.current], shareFileName, { type: 'application/pdf' });
+      const shareData: any = { title: 'Attendance Report', text: shareMessage, files: [file] };
+      if (typeof navigator !== 'undefined' && typeof navigator.canShare === 'function' && navigator.canShare(shareData)) {
+        await navigator.share(shareData);
+        toast.success('Shared successfully');
+        setShowShareDialog(false);
+      } else {
+        toast.error('Native sharing not supported here. Please download and share manually.');
+      }
+    } catch (err: any) {
+      if (err?.name === 'AbortError') return;
+      console.warn('Native share failed:', err);
+      toast.error('Native share blocked. Please download the PDF and share manually.');
+    }
+  };
+
+  const shareViaWhatsApp = () => {
+    downloadPDF();
+    window.open(`https://wa.me/?text=${encodeURIComponent(shareMessage + ' (PDF downloaded — please attach it)')}`, '_blank');
+  };
+
+  const shareViaTelegram = () => {
+    downloadPDF();
+    window.open(`https://t.me/share/url?url=${encodeURIComponent(shareMessage)}&text=${encodeURIComponent(shareMessage)}`, '_blank');
+  };
+
+  const shareViaEmail = () => {
+    downloadPDF();
+    window.location.href = `mailto:?subject=${encodeURIComponent('Attendance Report')}&body=${encodeURIComponent(shareMessage + '\n\nPlease find the attached PDF (downloaded to your device).')}`;
   };
 
   const updateStudentField = (id: string, field: string, value: string) => {
@@ -1116,6 +1146,32 @@ const DeptAdminDashboard = () => {
                   <Button onClick={sharePDF} disabled={history.length === 0}>
                     <Download className="w-4 h-4 mr-1" /> Share PDF
                   </Button>
+                  <Dialog open={showShareDialog} onOpenChange={setShowShareDialog}>
+                    <DialogContent>
+                      <DialogHeader><DialogTitle>Share Attendance PDF</DialogTitle></DialogHeader>
+                      <div className="space-y-2 pt-2">
+                        <p className="text-sm text-muted-foreground">{shareFileName}</p>
+                        <Button className="w-full" onClick={downloadPDF}>
+                          <Download className="w-4 h-4 mr-2" /> Download PDF
+                        </Button>
+                        <Button variant="outline" className="w-full" onClick={shareViaNative}>
+                          Share via device (if supported)
+                        </Button>
+                        <Button variant="outline" className="w-full" onClick={shareViaWhatsApp}>
+                          WhatsApp (downloads PDF + opens chat)
+                        </Button>
+                        <Button variant="outline" className="w-full" onClick={shareViaTelegram}>
+                          Telegram (downloads PDF + opens chat)
+                        </Button>
+                        <Button variant="outline" className="w-full" onClick={shareViaEmail}>
+                          Email (downloads PDF + opens mail)
+                        </Button>
+                        <p className="text-xs text-muted-foreground pt-2">
+                          Tip: native sharing is blocked inside the preview iframe. Open the published app on your phone for one-tap sharing, or download here and attach manually.
+                        </p>
+                      </div>
+                    </DialogContent>
+                  </Dialog>
                   <Button 
                     onClick={saveAttendance} 
                     disabled={syncingAttendance || pendingSyncCount === 0 || connectionStatus === 'offline'}
