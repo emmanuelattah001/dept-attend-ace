@@ -566,7 +566,7 @@ const DeptAdminDashboard = () => {
     }
   };
 
-  const [sheetsBusy, setSheetsBusy] = [/* placeholder, real state declared below */] as any;
+  
 
   const pushToGoogleSheets = async (action: 'sync_unsynced' | 'export_all') => {
     try {
