@@ -570,6 +570,7 @@ const DeptAdminDashboard = () => {
   
 
   const pushToGoogleSheets = async (action: 'sync_unsynced' | 'export_all') => {
+    setSheetsBusy(action === 'export_all' ? 'export' : 'sync');
     try {
       const { data, error } = await supabase.functions.invoke('sheets-sync', { body: { action } });
       if (error) throw error;
@@ -586,6 +587,8 @@ const DeptAdminDashboard = () => {
     } catch (err: any) {
       console.error('Google Sheets sync failed:', err);
       toast.error(`Google Sheets sync failed: ${err.message || 'Unknown error'}`);
+    } finally {
+      setSheetsBusy(false);
     }
   };
 
