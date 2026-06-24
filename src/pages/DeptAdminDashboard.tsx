@@ -75,6 +75,7 @@ const DeptAdminDashboard = () => {
   const [studentEdits, setStudentEdits] = useState<Record<string, Partial<Student>>>({});
   const [savingStudents, setSavingStudents] = useState(false);
   const [syncingAttendance, setSyncingAttendance] = useState(false);
+  const [sheetsBusy, setSheetsBusy] = useState<false | 'sync' | 'export'>(false);
   const [connectionStatus, setConnectionStatus] = useState<'online' | 'offline' | 'checking'>('checking');
 
   const [showAddDialog, setShowAddDialog] = useState(false);
