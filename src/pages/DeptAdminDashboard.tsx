@@ -566,8 +566,36 @@ const DeptAdminDashboard = () => {
     }
   };
 
+  const [sheetsBusy, setSheetsBusy] = [/* placeholder, real state declared below */] as any;
+
+  const pushToGoogleSheets = async (action: 'sync_unsynced' | 'export_all') => {
+    try {
+      const { data, error } = await supabase.functions.invoke('sheets-sync', { body: { action } });
+      if (error) throw error;
+      if (!data?.ok) throw new Error(data?.error || 'Unknown error');
+      if (data.synced > 0) {
+        toast.success(`Synced ${data.synced} record${data.synced !== 1 ? 's' : ''} to Google Sheets`, {
+          description: data.spreadsheetUrl ? 'Open spreadsheet' : undefined,
+          action: data.spreadsheetUrl ? { label: 'Open', onClick: () => window.open(data.spreadsheetUrl, '_blank') } : undefined,
+        });
+      } else {
+        toast.info(data.message || 'Nothing new to sync');
+      }
+      await fetchHistory();
+    } catch (err: any) {
+      console.error('Google Sheets sync failed:', err);
+      toast.error(`Google Sheets sync failed: ${err.message || 'Unknown error'}`);
+    }
+  };
+
   const saveAttendance = async () => {
     await syncAttendanceToDatabase();
+    // Best-effort push to Google Sheets; never block on failure
+    try {
+      await pushToGoogleSheets('sync_unsynced');
+    } catch (err) {
+      console.warn('Sheets background sync failed (non-blocking):', err);
+    }
   };
 
   const exportCSV = () => {
