@@ -14,6 +14,24 @@ export type Database = {
   }
   public: {
     Tables: {
+      app_settings: {
+        Row: {
+          key: string
+          updated_at: string
+          value: Json
+        }
+        Insert: {
+          key: string
+          updated_at?: string
+          value: Json
+        }
+        Update: {
+          key?: string
+          updated_at?: string
+          value?: Json
+        }
+        Relationships: []
+      }
       attendance: {
         Row: {
           course_id: string
@@ -25,6 +43,8 @@ export type Database = {
           status: Database["public"]["Enums"]["attendance_status"]
           student_id: string | null
           student_ref: string | null
+          synced_at: string | null
+          synced_to_sheets: boolean
         }
         Insert: {
           course_id: string
@@ -36,6 +56,8 @@ export type Database = {
           status?: Database["public"]["Enums"]["attendance_status"]
           student_id?: string | null
           student_ref?: string | null
+          synced_at?: string | null
+          synced_to_sheets?: boolean
         }
         Update: {
           course_id?: string
@@ -47,6 +69,8 @@ export type Database = {
           status?: Database["public"]["Enums"]["attendance_status"]
           student_id?: string | null
           student_ref?: string | null
+          synced_at?: string | null
+          synced_to_sheets?: boolean
         }
         Relationships: [
           {
