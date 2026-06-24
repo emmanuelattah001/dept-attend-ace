@@ -1460,15 +1460,35 @@ const DeptAdminDashboard = () => {
             <CardHeader>
               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                 <CardTitle className="text-lg">Attendance History</CardTitle>
-                <Button
-                  variant="destructive"
-                  size="sm"
-                  onClick={deleteAllHistory}
-                  disabled={deletingHistory || history.length === 0}
-                >
-                  {deletingHistory ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <Trash2 className="w-4 h-4 mr-1" />}
-                  {deletingHistory ? 'Deleting...' : 'Delete All History'}
-                </Button>
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => pushToGoogleSheets('sync_unsynced')}
+                    disabled={sheetsBusy !== false}
+                  >
+                    {sheetsBusy === 'sync' ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <RefreshCw className="w-4 h-4 mr-1" />}
+                    Sync to Google Sheets
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => pushToGoogleSheets('export_all')}
+                    disabled={sheetsBusy !== false}
+                  >
+                    {sheetsBusy === 'export' ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <Upload className="w-4 h-4 mr-1" />}
+                    Export to Google Sheets
+                  </Button>
+                  <Button
+                    variant="destructive"
+                    size="sm"
+                    onClick={deleteAllHistory}
+                    disabled={deletingHistory || history.length === 0}
+                  >
+                    {deletingHistory ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <Trash2 className="w-4 h-4 mr-1" />}
+                    {deletingHistory ? 'Deleting...' : 'Delete All History'}
+                  </Button>
+                </div>
               </div>
               <div className="flex flex-col sm:flex-row gap-2 mt-3">
                 <div className="relative flex-1">
