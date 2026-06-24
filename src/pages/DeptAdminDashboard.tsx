@@ -1175,6 +1175,22 @@ const DeptAdminDashboard = () => {
                   <Button variant="outline" onClick={exportExcel} disabled={students.length === 0}>
                     <Download className="w-4 h-4 mr-1" /> Excel
                   </Button>
+                  <Button
+                    variant="outline"
+                    onClick={() => pushToGoogleSheets('export_all')}
+                    disabled={sheetsBusy !== false}
+                  >
+                    {sheetsBusy === 'export' ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <Upload className="w-4 h-4 mr-1" />}
+                    Export to Google Sheets
+                  </Button>
+                  <Button
+                    variant="outline"
+                    onClick={() => pushToGoogleSheets('sync_unsynced')}
+                    disabled={sheetsBusy !== false}
+                  >
+                    {sheetsBusy === 'sync' ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <RefreshCw className="w-4 h-4 mr-1" />}
+                    Sync to Google Sheets
+                  </Button>
                   <Button onClick={sharePDF} disabled={history.length === 0}>
                     <Download className="w-4 h-4 mr-1" /> Share PDF
                   </Button>
