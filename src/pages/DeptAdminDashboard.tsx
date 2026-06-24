@@ -75,6 +75,7 @@ const DeptAdminDashboard = () => {
   const [studentEdits, setStudentEdits] = useState<Record<string, Partial<Student>>>({});
   const [savingStudents, setSavingStudents] = useState(false);
   const [syncingAttendance, setSyncingAttendance] = useState(false);
+  const [sheetsBusy, setSheetsBusy] = useState<false | 'sync' | 'export'>(false);
   const [connectionStatus, setConnectionStatus] = useState<'online' | 'offline' | 'checking'>('checking');
 
   const [showAddDialog, setShowAddDialog] = useState(false);
@@ -566,8 +567,39 @@ const DeptAdminDashboard = () => {
     }
   };
 
+  
+
+  const pushToGoogleSheets = async (action: 'sync_unsynced' | 'export_all') => {
+    setSheetsBusy(action === 'export_all' ? 'export' : 'sync');
+    try {
+      const { data, error } = await supabase.functions.invoke('sheets-sync', { body: { action } });
+      if (error) throw error;
+      if (!data?.ok) throw new Error(data?.error || 'Unknown error');
+      if (data.synced > 0) {
+        toast.success(`Synced ${data.synced} record${data.synced !== 1 ? 's' : ''} to Google Sheets`, {
+          description: data.spreadsheetUrl ? 'Open spreadsheet' : undefined,
+          action: data.spreadsheetUrl ? { label: 'Open', onClick: () => window.open(data.spreadsheetUrl, '_blank') } : undefined,
+        });
+      } else {
+        toast.info(data.message || 'Nothing new to sync');
+      }
+      await fetchHistory();
+    } catch (err: any) {
+      console.error('Google Sheets sync failed:', err);
+      toast.error(`Google Sheets sync failed: ${err.message || 'Unknown error'}`);
+    } finally {
+      setSheetsBusy(false);
+    }
+  };
+
   const saveAttendance = async () => {
     await syncAttendanceToDatabase();
+    // Best-effort push to Google Sheets; never block on failure
+    try {
+      await pushToGoogleSheets('sync_unsynced');
+    } catch (err) {
+      console.warn('Sheets background sync failed (non-blocking):', err);
+    }
   };
 
   const exportCSV = () => {
@@ -1428,15 +1460,35 @@ const DeptAdminDashboard = () => {
             <CardHeader>
               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                 <CardTitle className="text-lg">Attendance History</CardTitle>
-                <Button
-                  variant="destructive"
-                  size="sm"
-                  onClick={deleteAllHistory}
-                  disabled={deletingHistory || history.length === 0}
-                >
-                  {deletingHistory ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <Trash2 className="w-4 h-4 mr-1" />}
-                  {deletingHistory ? 'Deleting...' : 'Delete All History'}
-                </Button>
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => pushToGoogleSheets('sync_unsynced')}
+                    disabled={sheetsBusy !== false}
+                  >
+                    {sheetsBusy === 'sync' ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <RefreshCw className="w-4 h-4 mr-1" />}
+                    Sync to Google Sheets
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => pushToGoogleSheets('export_all')}
+                    disabled={sheetsBusy !== false}
+                  >
+                    {sheetsBusy === 'export' ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <Upload className="w-4 h-4 mr-1" />}
+                    Export to Google Sheets
+                  </Button>
+                  <Button
+                    variant="destructive"
+                    size="sm"
+                    onClick={deleteAllHistory}
+                    disabled={deletingHistory || history.length === 0}
+                  >
+                    {deletingHistory ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <Trash2 className="w-4 h-4 mr-1" />}
+                    {deletingHistory ? 'Deleting...' : 'Delete All History'}
+                  </Button>
+                </div>
               </div>
               <div className="flex flex-col sm:flex-row gap-2 mt-3">
                 <div className="relative flex-1">
