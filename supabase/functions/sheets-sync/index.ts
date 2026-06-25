@@ -149,11 +149,21 @@ Deno.serve(async (req) => {
     // Resolve spreadsheet ID
     const accessToken = await getAccessToken(serviceAccount);
     const { data: settingRow } = await admin.from('app_settings').select('value').eq('key', 'google_sheet_id').maybeSingle();
-    let spreadsheetId: string | undefined = settingRow?.value?.id;
+    let spreadsheetId: string | undefined = settingRow?.value?.id ?? Deno.env.get('GOOGLE_SHEET_ID') ?? undefined;
 
     if (!spreadsheetId) {
-      spreadsheetId = await createSpreadsheet(accessToken, `Attendance Archive — ${new Date().toISOString().slice(0, 10)}`);
-      await admin.from('app_settings').upsert({ key: 'google_sheet_id', value: { id: spreadsheetId, created_at: new Date().toISOString() } });
+      try {
+        spreadsheetId = await createSpreadsheet(accessToken, `Attendance Archive — ${new Date().toISOString().slice(0, 10)}`);
+        await admin.from('app_settings').upsert({ key: 'google_sheet_id', value: { id: spreadsheetId, created_at: new Date().toISOString() } });
+      } catch (e) {
+        const sa = serviceAccount.client_email ?? 'your service account';
+        throw new Error(
+          `Could not auto-create a spreadsheet (service accounts have no Drive quota). ` +
+          `Create a Google Sheet in your own Drive, share it with ${sa} as Editor, ` +
+          `then either set the GOOGLE_SHEET_ID secret to its ID or insert it into app_settings ` +
+          `(key='google_sheet_id', value={"id":"<SHEET_ID>"}). Original error: ${(e as Error).message}`
+        );
+      }
     }
 
     const values = rows.map((r: any) => [
