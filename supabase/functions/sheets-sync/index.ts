@@ -128,7 +128,7 @@ Deno.serve(async (req) => {
     // Pick records
     let query = admin
       .from('attendance')
-      .select('id, date, status, marked_at, synced_to_sheets, students:student_ref(name, matric_no), courses:course_id(name, code), departments:department_id(name)')
+      .select('id, date, status, created_at, synced_to_sheets, students:student_ref(name, matric_no), courses:course_id(name, code), departments:department_id(name)')
       .order('date', { ascending: true });
 
     if (action === 'append' && Array.isArray(body.ids) && body.ids.length) {
@@ -165,7 +165,7 @@ Deno.serve(async (req) => {
       r.courses?.name ?? '',
       r.departments?.name ?? '',
       r.status,
-      r.marked_at ?? '',
+      r.created_at ?? '',
     ]);
 
     await appendRows(accessToken, spreadsheetId, values);
