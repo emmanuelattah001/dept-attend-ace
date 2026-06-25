@@ -15,6 +15,7 @@ import {
   RefreshCw, WifiOff, Loader2 
 } from 'lucide-react';
 import DashboardLayout from '@/components/DashboardLayout';
+import { SheetsActions } from '@/components/SheetsActions';
 import LoadingScreen from '@/components/LoadingScreen';
 import * as XLSX from "xlsx";
 import jsPDF from 'jspdf';
@@ -1175,22 +1176,11 @@ const DeptAdminDashboard = () => {
                   <Button variant="outline" onClick={exportExcel} disabled={students.length === 0}>
                     <Download className="w-4 h-4 mr-1" /> Excel
                   </Button>
-                  <Button
-                    variant="outline"
-                    onClick={() => pushToGoogleSheets('export_all')}
-                    disabled={sheetsBusy !== false}
-                  >
-                    {sheetsBusy === 'export' ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <Upload className="w-4 h-4 mr-1" />}
-                    Export to Google Sheets
-                  </Button>
-                  <Button
-                    variant="outline"
-                    onClick={() => pushToGoogleSheets('sync_unsynced')}
-                    disabled={sheetsBusy !== false}
-                  >
-                    {sheetsBusy === 'sync' ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <RefreshCw className="w-4 h-4 mr-1" />}
-                    Sync to Google Sheets
-                  </Button>
+                  <SheetsActions
+                    busy={sheetsBusy}
+                    onExport={() => pushToGoogleSheets('export_all')}
+                    onSync={() => pushToGoogleSheets('sync_unsynced')}
+                  />
                   <Button onClick={sharePDF} disabled={history.length === 0}>
                     <Download className="w-4 h-4 mr-1" /> Share PDF
                   </Button>
@@ -1477,24 +1467,12 @@ const DeptAdminDashboard = () => {
               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                 <CardTitle className="text-lg">Attendance History</CardTitle>
                 <div className="flex flex-wrap gap-2">
-                  <Button
-                    variant="outline"
+                  <SheetsActions
+                    busy={sheetsBusy}
                     size="sm"
-                    onClick={() => pushToGoogleSheets('sync_unsynced')}
-                    disabled={sheetsBusy !== false}
-                  >
-                    {sheetsBusy === 'sync' ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <RefreshCw className="w-4 h-4 mr-1" />}
-                    Sync to Google Sheets
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => pushToGoogleSheets('export_all')}
-                    disabled={sheetsBusy !== false}
-                  >
-                    {sheetsBusy === 'export' ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <Upload className="w-4 h-4 mr-1" />}
-                    Export to Google Sheets
-                  </Button>
+                    onExport={() => pushToGoogleSheets('export_all')}
+                    onSync={() => pushToGoogleSheets('sync_unsynced')}
+                  />
                   <Button
                     variant="destructive"
                     size="sm"
