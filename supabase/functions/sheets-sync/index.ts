@@ -85,7 +85,7 @@ async function createSpreadsheet(token: string, title: string): Promise<string> 
 
 async function appendRows(token: string, spreadsheetId: string, rows: any[][]) {
   const resp = await fetch(
-    `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${SHEET_TAB}!A:I:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`,
+    `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${SHEET_RANGE}:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`,
     {
       method: 'POST',
       headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
@@ -95,6 +95,29 @@ async function appendRows(token: string, spreadsheetId: string, rows: any[][]) {
   const data = await resp.json();
   if (!resp.ok) throw new Error(`Sheets append failed: ${JSON.stringify(data)}`);
   return data;
+}
+
+async function ensureHeader(token: string, spreadsheetId: string) {
+  // Read row 1
+  const getResp = await fetch(
+    `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${HEADER_RANGE}`,
+    { headers: { Authorization: `Bearer ${token}` } },
+  );
+  const getData = await getResp.json();
+  if (!getResp.ok) throw new Error(`Sheets header read failed: ${JSON.stringify(getData)}`);
+  const current: string[] = getData.values?.[0] ?? [];
+  const matches = HEADER_ROW.every((h, i) => current[i] === h);
+  if (matches) return;
+  const putResp = await fetch(
+    `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${HEADER_RANGE}?valueInputOption=RAW`,
+    {
+      method: 'PUT',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ values: [HEADER_ROW] }),
+    },
+  );
+  const putData = await putResp.json();
+  if (!putResp.ok) throw new Error(`Sheets header write failed: ${JSON.stringify(putData)}`);
 }
 
 // ---------- Main ----------
