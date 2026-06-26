@@ -153,7 +153,7 @@ Deno.serve(async (req) => {
     // Pick records
     let query = admin
       .from('attendance')
-      .select('id, date, status, created_at, synced_to_sheets, students:student_ref(name, matric_no), courses:course_id(name, code), departments:department_id(name)')
+      .select('id, date, status, created_at, marked_by, synced_to_sheets, student_ref, students:student_ref(name, matric_no)')
       .order('date', { ascending: true });
 
     if (action === 'append' && Array.isArray(body.ids) && body.ids.length) {
@@ -171,10 +171,18 @@ Deno.serve(async (req) => {
       });
     }
 
+    // Resolve marked_by -> profile name
+    const markerIds = Array.from(new Set(rows.map((r: any) => r.marked_by).filter(Boolean)));
+    const markerMap = new Map<string, string>();
+    if (markerIds.length) {
+      const { data: markers } = await admin.from('profiles').select('user_id, name, email').in('user_id', markerIds);
+      for (const m of markers ?? []) markerMap.set(m.user_id, m.name || m.email || m.user_id);
+    }
+
     // Resolve spreadsheet ID
     const accessToken = await getAccessToken(serviceAccount);
     const { data: settingRow } = await admin.from('app_settings').select('value').eq('key', 'google_sheet_id').maybeSingle();
-    let spreadsheetId: string | undefined = settingRow?.value?.id ?? Deno.env.get('GOOGLE_SHEET_ID') ?? undefined;
+    let spreadsheetId: string | undefined = (settingRow?.value as any)?.id ?? Deno.env.get('GOOGLE_SHEET_ID') ?? undefined;
 
     if (!spreadsheetId) {
       try {
@@ -191,16 +199,15 @@ Deno.serve(async (req) => {
       }
     }
 
+    // Make sure the header row matches the expected columns
+    await ensureHeader(accessToken, spreadsheetId);
+
     const values = rows.map((r: any) => [
-      r.id,
-      r.date,
+      r.student_ref ?? '',
       r.students?.name ?? '',
-      r.students?.matric_no ?? '',
-      r.courses?.code ?? '',
-      r.courses?.name ?? '',
-      r.departments?.name ?? '',
+      r.date,
       r.status,
-      r.created_at ?? '',
+      markerMap.get(r.marked_by) ?? r.marked_by ?? '',
     ]);
 
     await appendRows(accessToken, spreadsheetId, values);
