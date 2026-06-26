@@ -98,6 +98,27 @@ async function appendRows(token: string, spreadsheetId: string, rows: any[][]) {
 }
 
 async function ensureHeader(token: string, spreadsheetId: string) {
+  // Check that the SHEET_TAB exists; create it if missing
+  const metaResp = await fetch(
+    `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}?fields=sheets.properties(title)`,
+    { headers: { Authorization: `Bearer ${token}` } },
+  );
+  const meta = await metaResp.json();
+  if (!metaResp.ok) throw new Error(`Sheets metadata read failed: ${JSON.stringify(meta)}`);
+  const titles: string[] = (meta.sheets ?? []).map((s: any) => s.properties?.title).filter(Boolean);
+  if (!titles.includes(SHEET_TAB)) {
+    const addResp = await fetch(
+      `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}:batchUpdate`,
+      {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ requests: [{ addSheet: { properties: { title: SHEET_TAB } } }] }),
+      },
+    );
+    const addData = await addResp.json();
+    if (!addResp.ok) throw new Error(`Sheets tab create failed: ${JSON.stringify(addData)}`);
+  }
+
   // Read row 1
   const getResp = await fetch(
     `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${HEADER_RANGE}`,
