@@ -5,8 +5,14 @@ import { corsHeaders } from 'npm:@supabase/supabase-js@2/cors';
 
 const SHEET_TAB = 'Attendance';
 const HEADER_ROW = ['student_id', 'student_name', 'date', 'status', 'marked_by'];
-const SHEET_RANGE = `${SHEET_TAB}!A:E`;
-const HEADER_RANGE = `${SHEET_TAB}!A1:E1`;
+
+function quoteSheetName(title: string): string {
+  return `'${title.replace(/'/g, "''")}'`;
+}
+
+function sheetRange(title: string, range: string): string {
+  return `${quoteSheetName(title)}!${range}`;
+}
 
 // ---------- Google auth (service account JWT -> access token) ----------
 function pemToArrayBuffer(pem: string): ArrayBuffer {
@@ -75,7 +81,7 @@ async function createSpreadsheet(token: string, title: string): Promise<string> 
   const id = data.spreadsheetId as string;
 
   // Write header row
-  await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${id}/values/${SHEET_TAB}!A1:I1?valueInputOption=RAW`, {
+  await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${id}/values/${sheetRange(SHEET_TAB, 'A1:E1')}?valueInputOption=RAW`, {
     method: 'PUT',
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({ values: [HEADER_ROW] }),
@@ -83,9 +89,9 @@ async function createSpreadsheet(token: string, title: string): Promise<string> 
   return id;
 }
 
-async function appendRows(token: string, spreadsheetId: string, rows: any[][]) {
+async function appendRows(token: string, spreadsheetId: string, tabTitle: string, rows: any[][]) {
   const resp = await fetch(
-    `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${SHEET_RANGE}:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`,
+    `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${sheetRange(tabTitle, 'A:E')}:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`,
     {
       method: 'POST',
       headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
@@ -97,8 +103,33 @@ async function appendRows(token: string, spreadsheetId: string, rows: any[][]) {
   return data;
 }
 
-async function ensureHeader(token: string, spreadsheetId: string) {
-  // Check that the SHEET_TAB exists; create it if missing
+async function clearSheetRows(token: string, spreadsheetId: string, tabTitle: string) {
+  const resp = await fetch(
+    `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${sheetRange(tabTitle, 'A:E')}:clear`,
+    {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+    },
+  );
+  const data = await resp.json();
+  if (!resp.ok) throw new Error(`Sheets clear failed: ${JSON.stringify(data)}`);
+}
+
+async function writeRows(token: string, spreadsheetId: string, tabTitle: string, rows: any[][]) {
+  const resp = await fetch(
+    `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${sheetRange(tabTitle, 'A1:E' + rows.length)}?valueInputOption=RAW`,
+    {
+      method: 'PUT',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ values: rows }),
+    },
+  );
+  const data = await resp.json();
+  if (!resp.ok) throw new Error(`Sheets write failed: ${JSON.stringify(data)}`);
+}
+
+async function getTargetSheetTitle(token: string, spreadsheetId: string): Promise<string> {
   const metaResp = await fetch(
     `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}?fields=sheets.properties(title)`,
     { headers: { Authorization: `Bearer ${token}` } },
@@ -106,22 +137,28 @@ async function ensureHeader(token: string, spreadsheetId: string) {
   const meta = await metaResp.json();
   if (!metaResp.ok) throw new Error(`Sheets metadata read failed: ${JSON.stringify(meta)}`);
   const titles: string[] = (meta.sheets ?? []).map((s: any) => s.properties?.title).filter(Boolean);
-  if (!titles.includes(SHEET_TAB)) {
-    const addResp = await fetch(
-      `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}:batchUpdate`,
-      {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ requests: [{ addSheet: { properties: { title: SHEET_TAB } } }] }),
-      },
-    );
-    const addData = await addResp.json();
-    if (!addResp.ok) throw new Error(`Sheets tab create failed: ${JSON.stringify(addData)}`);
-  }
 
+  // Use the first visible tab in the user's spreadsheet, so the sheet they opened
+  // (usually gid=0) is populated instead of silently writing to a new tab.
+  if (titles.length) return titles[0];
+
+  const addResp = await fetch(
+    `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}:batchUpdate`,
+    {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ requests: [{ addSheet: { properties: { title: SHEET_TAB } } }] }),
+    },
+  );
+  const addData = await addResp.json();
+  if (!addResp.ok) throw new Error(`Sheets tab create failed: ${JSON.stringify(addData)}`);
+  return SHEET_TAB;
+}
+
+async function ensureHeader(token: string, spreadsheetId: string, tabTitle: string) {
   // Read row 1
   const getResp = await fetch(
-    `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${HEADER_RANGE}`,
+    `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${sheetRange(tabTitle, 'A1:E1')}`,
     { headers: { Authorization: `Bearer ${token}` } },
   );
   const getData = await getResp.json();
@@ -130,7 +167,7 @@ async function ensureHeader(token: string, spreadsheetId: string) {
   const matches = HEADER_ROW.every((h, i) => current[i] === h);
   if (matches) return;
   const putResp = await fetch(
-    `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${HEADER_RANGE}?valueInputOption=RAW`,
+    `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${sheetRange(tabTitle, 'A1:E1')}?valueInputOption=RAW`,
     {
       method: 'PUT',
       headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
@@ -139,6 +176,41 @@ async function ensureHeader(token: string, spreadsheetId: string) {
   );
   const putData = await putResp.json();
   if (!putResp.ok) throw new Error(`Sheets header write failed: ${JSON.stringify(putData)}`);
+}
+
+async function fetchAttendanceRows(admin: any, action: string, ids?: string[]) {
+  const pageSize = 1000;
+  let from = 0;
+  const allRows: any[] = [];
+
+  while (true) {
+    let query = admin
+      .from('attendance')
+      .select('id, date, status, created_at, marked_by, synced_to_sheets, student_ref, students:student_ref(name, matric_no)')
+      .order('date', { ascending: true })
+      .range(from, from + pageSize - 1);
+
+    if (action === 'append' && Array.isArray(ids) && ids.length) {
+      query = query.in('id', ids);
+    } else if (action === 'sync_unsynced') {
+      query = query.eq('synced_to_sheets', false);
+    }
+
+    const { data, error } = await query;
+    if (error) throw error;
+
+    allRows.push(...(data ?? []));
+    if (!data || data.length < pageSize) break;
+    from += pageSize;
+  }
+
+  return allRows.sort((a, b) => {
+    const byDate = String(a.date ?? '').localeCompare(String(b.date ?? ''));
+    if (byDate !== 0) return byDate;
+    const byName = String(a.students?.name ?? '').localeCompare(String(b.students?.name ?? ''));
+    if (byName !== 0) return byName;
+    return String(a.status ?? '').localeCompare(String(b.status ?? ''));
+  });
 }
 
 // ---------- Main ----------
@@ -171,26 +243,7 @@ Deno.serve(async (req) => {
     const body = await req.json().catch(() => ({}));
     const action: 'append' | 'sync_unsynced' | 'export_all' = body.action || 'sync_unsynced';
 
-    // Pick records
-    let query = admin
-      .from('attendance')
-      .select('id, date, status, created_at, marked_by, synced_to_sheets, student_ref, students:student_ref(name, matric_no)')
-      .order('date', { ascending: true });
-
-    if (action === 'append' && Array.isArray(body.ids) && body.ids.length) {
-      query = query.in('id', body.ids);
-    } else if (action === 'sync_unsynced') {
-      query = query.eq('synced_to_sheets', false);
-    }
-    // export_all -> no filter
-
-    const { data: rows, error } = await query;
-    if (error) throw error;
-    if (!rows || rows.length === 0) {
-      return new Response(JSON.stringify({ ok: true, synced: 0, message: 'No records to sync' }), {
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      });
-    }
+    const rows = await fetchAttendanceRows(admin, action, body.ids);
 
     // Resolve marked_by -> profile name
     const markerIds = Array.from(new Set(rows.map((r: any) => r.marked_by).filter(Boolean)));
@@ -220,18 +273,31 @@ Deno.serve(async (req) => {
       }
     }
 
-    // Make sure the header row matches the expected columns
-    await ensureHeader(accessToken, spreadsheetId);
+    const targetSheetTitle = await getTargetSheetTitle(accessToken, spreadsheetId);
+
+    // Make sure the header row matches the expected columns on the visible sheet tab.
+    await ensureHeader(accessToken, spreadsheetId, targetSheetTitle);
+
+    if (!rows || rows.length === 0) {
+      return new Response(JSON.stringify({ ok: true, synced: 0, spreadsheetId, sheet: targetSheetTitle, message: 'No records to sync' }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
 
     const values = rows.map((r: any) => [
-      r.student_ref ?? '',
+      r.students?.matric_no ?? r.student_ref ?? '',
       r.students?.name ?? '',
       r.date,
       r.status,
       markerMap.get(r.marked_by) ?? r.marked_by ?? '',
     ]);
 
-    await appendRows(accessToken, spreadsheetId, values);
+    if (action === 'export_all') {
+      await clearSheetRows(accessToken, spreadsheetId, targetSheetTitle);
+      await writeRows(accessToken, spreadsheetId, targetSheetTitle, [HEADER_ROW, ...values]);
+    } else {
+      await appendRows(accessToken, spreadsheetId, targetSheetTitle, values);
+    }
 
     // Mark synced
     const ids = rows.map((r: any) => r.id);
@@ -241,7 +307,7 @@ Deno.serve(async (req) => {
       .in('id', ids);
 
     const spreadsheetUrl = `https://docs.google.com/spreadsheets/d/${spreadsheetId}`;
-    return new Response(JSON.stringify({ ok: true, synced: ids.length, spreadsheetId, spreadsheetUrl }), {
+    return new Response(JSON.stringify({ ok: true, synced: ids.length, spreadsheetId, spreadsheetUrl, sheet: targetSheetTitle }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
   } catch (e: any) {
