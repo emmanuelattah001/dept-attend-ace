@@ -1,0 +1,1 @@
+update public.attendance set synced_to_sheets = false, synced_at = null where synced_to_sheets = true;
