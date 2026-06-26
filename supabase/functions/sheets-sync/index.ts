@@ -4,7 +4,9 @@ import { createClient } from 'npm:@supabase/supabase-js@2';
 import { corsHeaders } from 'npm:@supabase/supabase-js@2/cors';
 
 const SHEET_TAB = 'Attendance';
-const HEADER_ROW = ['attendance_id', 'date', 'student_name', 'matric_no', 'course_code', 'course_name', 'department', 'status', 'marked_at'];
+const HEADER_ROW = ['student_id', 'student_name', 'date', 'status', 'marked_by'];
+const SHEET_RANGE = `${SHEET_TAB}!A:E`;
+const HEADER_RANGE = `${SHEET_TAB}!A1:E1`;
 
 // ---------- Google auth (service account JWT -> access token) ----------
 function pemToArrayBuffer(pem: string): ArrayBuffer {
