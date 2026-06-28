@@ -1137,19 +1137,30 @@ const DeptAdminDashboard = () => {
           </CardContent>
         </Card>
 
-        <div className="flex gap-2 border-b">
-          {tabs.map(tab => (
-            <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
-              className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${
-                activeTab === tab.id ? 'border-primary text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'
-              }`}
-            >
-              <tab.icon className="w-4 h-4" /> {tab.label}
-            </button>
-          ))}
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b pb-2">
+          <div className="flex gap-2">
+            {tabs.map(tab => (
+              <button
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id)}
+                className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${
+                  activeTab === tab.id ? 'border-primary text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'
+                }`}
+              >
+                <tab.icon className="w-4 h-4" /> {tab.label}
+              </button>
+            ))}
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <SheetsActions
+              busy={sheetsBusy}
+              size="sm"
+              onExport={() => pushToGoogleSheets('export_all')}
+              onSync={() => pushToGoogleSheets('sync_unsynced')}
+            />
+          </div>
         </div>
+
 
         {activeTab === 'mark' && (
           <Card>
