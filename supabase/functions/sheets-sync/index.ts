@@ -213,16 +213,55 @@ async function fetchAttendanceRows(admin: any, action: string, ids?: string[]) {
   });
 }
 
+// ---------- Sheet read helper ----------
+async function readAllSheetRows(token: string, spreadsheetId: string, tabTitle: string): Promise<string[][]> {
+  const resp = await fetch(
+    `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${sheetRange(tabTitle, 'A2:E')}`,
+    { headers: { Authorization: `Bearer ${token}` } },
+  );
+  const data = await resp.json();
+  if (!resp.ok) throw new Error(`Sheets read failed: ${JSON.stringify(data)}`);
+  return (data.values ?? []) as string[][];
+}
+
 // ---------- Main ----------
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
 
   try {
+    const body = await req.json().catch(() => ({}));
+    const action: 'append' | 'sync_unsynced' | 'export_all' | 'lookup_by_matric' = body.action || 'sync_unsynced';
+
+    const saJson = Deno.env.get('GOOGLE_SERVICE_ACCOUNT_JSON');
+    if (!saJson) throw new Error('GOOGLE_SERVICE_ACCOUNT_JSON not configured');
+    const serviceAccount = JSON.parse(saJson);
+    const admin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
+    const accessToken = await getAccessToken(serviceAccount);
+    const { data: settingRow } = await admin.from('app_settings').select('value').eq('key', 'google_sheet_id').maybeSingle();
+    const spreadsheetIdFromStore: string | undefined = (settingRow?.value as any)?.id ?? Deno.env.get('GOOGLE_SHEET_ID') ?? undefined;
+
+    // ---- Public action: lookup attendance from the sheet by matric number ----
+    if (action === 'lookup_by_matric') {
+      const matric = String(body.matric_no ?? '').trim().toLowerCase();
+      if (!matric) {
+        return new Response(JSON.stringify({ ok: false, error: 'matric_no required' }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      }
+      if (!spreadsheetIdFromStore) {
+        return new Response(JSON.stringify({ ok: true, rows: [] }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      }
+      const targetSheetTitle = await getTargetSheetTitle(accessToken, spreadsheetIdFromStore);
+      const all = await readAllSheetRows(accessToken, spreadsheetIdFromStore, targetSheetTitle);
+      const rows = all
+        .filter((r) => String(r[0] ?? '').trim().toLowerCase() === matric)
+        .map((r) => ({ student_id: r[0], student_name: r[1], date: r[2], status: r[3], marked_by: r[4] }));
+      return new Response(JSON.stringify({ ok: true, rows }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    }
+
+    // ---- Authenticated actions below ----
     const authHeader = req.headers.get('Authorization');
     if (!authHeader?.startsWith('Bearer ')) {
       return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
-
     const supabase = createClient(
       Deno.env.get('SUPABASE_URL')!,
       Deno.env.get('SUPABASE_ANON_KEY')!,
@@ -233,15 +272,6 @@ Deno.serve(async (req) => {
     if (claimsErr || !claims?.claims) {
       return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
-
-    const saJson = Deno.env.get('GOOGLE_SERVICE_ACCOUNT_JSON');
-    if (!saJson) throw new Error('GOOGLE_SERVICE_ACCOUNT_JSON not configured');
-    const serviceAccount = JSON.parse(saJson);
-
-    const admin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
-
-    const body = await req.json().catch(() => ({}));
-    const action: 'append' | 'sync_unsynced' | 'export_all' = body.action || 'sync_unsynced';
 
     const rows = await fetchAttendanceRows(admin, action, body.ids);
 
