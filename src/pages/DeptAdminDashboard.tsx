@@ -497,57 +497,55 @@ const DeptAdminDashboard = () => {
     let errorCount = 0;
     
     try {
-      for (const item of unsynced) {
-        try {
-           const { error: deleteError } = await (supabase as any)
-            .from('attendance')
-            .delete()
-            .eq('student_ref', item.studentId)
-            .eq('course_id', item.courseId)
-            .eq('date', item.date);
-          
-          if (deleteError) {
-            console.error('Delete error:', deleteError);
-          }
-          
-          const { error: insertError } = await (supabase as any)
-            .from('attendance')
-            .insert({
-              student_ref: item.studentId,
-              course_id: item.courseId,
-              department_id: profile.department_id,
-              marked_by: user.id,
-              date: item.date,
-              status: item.status === 'P' ? 'present' : 'absent',
-            });
-          
-          if (insertError) {
-            console.error('Insert error:', insertError);
-            errorCount++;
-          } else {
-            successCount++;
-          }
-        } catch (err) {
-          console.error('Error processing record:', err);
-          errorCount++;
-        }
+      // Build rows for a single batched upsert (fast: 1 round-trip instead of 2N)
+      const rows = unsynced.map(item => ({
+        student_ref: item.studentId,
+        course_id: item.courseId,
+        department_id: profile.department_id,
+        marked_by: user.id,
+        date: item.date,
+        status: item.status === 'P' ? 'present' : 'absent',
+      }));
+
+      // Chunk to avoid payload limits on very large saves
+      const chunkSize = 500;
+      const chunks: typeof rows[] = [];
+      for (let i = 0; i < rows.length; i += chunkSize) {
+        chunks.push(rows.slice(i, i + chunkSize));
       }
-      
+
+      const results = await Promise.all(
+        chunks.map(chunk =>
+          (supabase as any)
+            .from('attendance')
+            .upsert(chunk, { onConflict: 'student_ref,course_id,date' })
+        )
+      );
+
+      results.forEach((res, idx) => {
+        if (res.error) {
+          console.error('Upsert error:', res.error);
+          errorCount += chunks[idx].length;
+        } else {
+          successCount += chunks[idx].length;
+        }
+      });
+
       if (successCount > 0) {
-        setLocalAttendance(prev => 
+        setLocalAttendance(prev =>
           prev.map(item => {
-            const wasSynced = unsynced.some(u => 
-              u.studentId === item.studentId && u.date === item.date
+            const wasSynced = unsynced.some(u =>
+              u.studentId === item.studentId && u.date === item.date && u.courseId === item.courseId
             );
             return wasSynced ? { ...item, synced: true, error: undefined } : item;
           })
         );
-        
-        toast.success(`Successfully synced ${successCount} attendance record${successCount !== 1 ? 's' : ''}`);
-        await fetchAttendanceGrid();
-        await fetchHistory();
+
+        toast.success(`Saved ${successCount} attendance record${successCount !== 1 ? 's' : ''}`);
+        // Refresh in parallel + don't block the UI
+        void Promise.all([fetchAttendanceGrid(), fetchHistory()]);
       }
-      
+
       if (errorCount > 0) {
         toast.error(`Failed to sync ${errorCount} record${errorCount !== 1 ? 's' : ''}. Please try again.`);
       }
