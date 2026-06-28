@@ -23,23 +23,54 @@ const StudentDashboard = () => {
   useEffect(() => {
     if (!user) return;
     const fetchAttendance = async () => {
-      const { data } = await supabase
-        .from('attendance')
-        .select('*, departments(name)')
-        .eq('student_id', user.id)
-        .order('date', { ascending: false });
-      if (data) {
-        const typed = data as unknown as AttendanceRecord[];
-        setRecords(typed);
-        setStats({
-          present: typed.filter(r => r.status === 'present').length,
-          absent: typed.filter(r => r.status === 'absent').length,
-        });
-      }
+      // Look up this user's student row to get matric_no for sheet lookup
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('email, name')
+        .eq('user_id', user.id)
+        .maybeSingle();
+
+      const { data: studentRow } = await supabase
+        .from('students')
+        .select('id, matric_no')
+        .or(`email.eq.${profile?.email ?? ''},name.eq.${profile?.name ?? ''}`)
+        .maybeSingle();
+
+      const [dbRes, sheetRes] = await Promise.all([
+        supabase
+          .from('attendance')
+          .select('id, date, status, departments(name)')
+          .eq('student_id', user.id)
+          .order('date', { ascending: false }),
+        studentRow?.matric_no
+          ? supabase.functions.invoke('sheets-sync', {
+              body: { action: 'lookup_by_matric', matric_no: studentRow.matric_no },
+            })
+          : Promise.resolve({ data: { rows: [] }, error: null } as any),
+      ]);
+
+      const seen = new Set<string>();
+      const merged: AttendanceRecord[] = [];
+      const push = (id: string, date: string, status: string, deptName: string | null) => {
+        const key = `${date}|${(status || '').toLowerCase()}`;
+        if (!date || seen.has(key)) return;
+        seen.add(key);
+        merged.push({ id, date, status, departments: deptName ? { name: deptName } : null });
+      };
+      for (const r of (dbRes.data ?? []) as any[]) push(r.id, r.date, r.status, r.departments?.name ?? null);
+      for (const r of (sheetRes.data?.rows ?? []) as any[]) push(`sheet-${r.date}-${r.status}`, r.date, r.status, null);
+      merged.sort((a, b) => b.date.localeCompare(a.date));
+
+      setRecords(merged);
+      setStats({
+        present: merged.filter(r => r.status?.toLowerCase() === 'present').length,
+        absent: merged.filter(r => r.status?.toLowerCase() === 'absent').length,
+      });
       setInitialLoading(false);
     };
     fetchAttendance();
   }, [user]);
+
 
   const total = stats.present + stats.absent;
   const percentage = total > 0 ? Math.round((stats.present / total) * 100) : 0;
