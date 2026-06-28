@@ -47,31 +47,38 @@ const CheckAttendance = () => {
     return;
   }
 
-  // 2. Get attendance using student id
-  const { data, error } = await supabase
-    .from('attendance')
-    .select('date, status, department_id')
-    .eq('student_ref', student.id)
-    .order('date', { ascending: false });
+  // 2. Get attendance from DB (current) + sheet (permanent archive)
+  const [dbRes, sheetRes] = await Promise.all([
+    supabase
+      .from('attendance')
+      .select('date, status, department_id')
+      .eq('student_ref', student.id)
+      .order('date', { ascending: false }),
+    supabase.functions.invoke('sheets-sync', {
+      body: { action: 'lookup_by_matric', matric_no: trimmed },
+    }),
+  ]);
 
-  console.log("DATA:", data);
-  console.log("ERROR:", error);
+  if (dbRes.error) console.log('DB ERROR:', dbRes.error);
+  if (sheetRes.error) console.log('SHEET ERROR:', sheetRes.error);
 
-  if (error) {
-    toast.error(error.message);
-    setRecords([]);
-  } else {
-    setRecords(
-      (data || []).map((r: any) => ({
-        attendance_date: r.date,
-        status: r.status,
-        department_name: ''
-      }))
-    );
-  }
+  // Union — sheet rows survive even after DB deletion; dedupe by date+status
+  const seen = new Set<string>();
+  const merged: AttendanceRow[] = [];
+  const push = (date: string, status: string) => {
+    const key = `${date}|${(status || '').toLowerCase()}`;
+    if (!date || seen.has(key)) return;
+    seen.add(key);
+    merged.push({ attendance_date: date, status, department_name: '' });
+  };
+  for (const r of (dbRes.data ?? []) as any[]) push(r.date, r.status);
+  for (const r of (sheetRes.data?.rows ?? []) as any[]) push(r.date, r.status);
+  merged.sort((a, b) => b.attendance_date.localeCompare(a.attendance_date));
+  setRecords(merged);
 
   setLoading(false);
 };
+
 
   const present = records.filter(r => r.status?.toLowerCase() === 'present').length;
   const absent = records.filter(r => r.status?.toLowerCase() === 'absent').length;
