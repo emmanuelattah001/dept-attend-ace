@@ -283,10 +283,9 @@ Deno.serve(async (req) => {
       for (const m of markers ?? []) markerMap.set(m.user_id, m.name || m.email || m.user_id);
     }
 
-    // Resolve spreadsheet ID
-    const accessToken = await getAccessToken(serviceAccount);
-    const { data: settingRow } = await admin.from('app_settings').select('value').eq('key', 'google_sheet_id').maybeSingle();
-    let spreadsheetId: string | undefined = (settingRow?.value as any)?.id ?? Deno.env.get('GOOGLE_SHEET_ID') ?? undefined;
+    // Resolve spreadsheet ID (accessToken already created above)
+    let spreadsheetId: string | undefined = spreadsheetIdFromStore;
+
 
     if (!spreadsheetId) {
       try {
