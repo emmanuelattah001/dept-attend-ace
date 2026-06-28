@@ -595,13 +595,13 @@ const DeptAdminDashboard = () => {
 
   const saveAttendance = async () => {
     await syncAttendanceToDatabase();
-    // Best-effort push to Google Sheets; never block on failure
-    try {
-      await pushToGoogleSheets('sync_unsynced');
-    } catch (err) {
+    // Fire-and-forget Google Sheets push so the UI unblocks immediately.
+    // Sheets sync can take several seconds; we don't make the user wait.
+    void pushToGoogleSheets('sync_unsynced').catch((err) => {
       console.warn('Sheets background sync failed (non-blocking):', err);
-    }
+    });
   };
+
 
   const exportCSV = () => {
     if (students.length === 0) {
