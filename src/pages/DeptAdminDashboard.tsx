@@ -1044,6 +1044,57 @@ const DeptAdminDashboard = () => {
     { id: 'history' as const, label: 'History', icon: History },
   ];
 
+  // Live QR session helpers
+  const createQrSession = async () => {
+    if (!qrCourseId) { toast.error('Pick a course first'); return; }
+    if (!profile?.department_id || !user) { toast.error('Missing profile'); return; }
+    setQrCreating(true);
+    try {
+      const token = Array.from(crypto.getRandomValues(new Uint8Array(18)))
+        .map((b) => 'abcdefghijklmnopqrstuvwxyz0123456789'[b % 36]).join('');
+      const expires_at = new Date(Date.now() + qrDurationMin * 60_000).toISOString();
+      const { data, error } = await (supabase as any).from('attendance_sessions').insert({
+        course_id: qrCourseId,
+        department_id: profile.department_id,
+        date: qrDate,
+        token,
+        expires_at,
+        created_by: user.id,
+      }).select('token, expires_at, course_id, date').single();
+      if (error) throw error;
+      setQrSession(data);
+      toast.success('Live session started');
+    } catch (e: any) {
+      toast.error(e.message ?? 'Failed to start session');
+    } finally {
+      setQrCreating(false);
+    }
+  };
+
+  const endQrSession = async () => {
+    if (!qrSession) return;
+    await (supabase as any).from('attendance_sessions').update({ expires_at: new Date().toISOString() }).eq('token', qrSession.token);
+    setQrSession(null);
+    toast.message('Session ended');
+  };
+
+  const provisionStudentLogins = async () => {
+    setProvisioningAuth(true);
+    try {
+      const { data, error } = await supabase.functions.invoke('provision-student-auth', { body: {} });
+      if (error || (data as any)?.error) throw new Error((data as any)?.error || error?.message);
+      const created = (data as any)?.results?.filter((r: any) => r.status === 'created').length ?? 0;
+      const existing = (data as any)?.results?.filter((r: any) => r.status === 'already_provisioned').length ?? 0;
+      const failed = (data as any)?.results?.filter((r: any) => r.error || r.skipped).length ?? 0;
+      toast.success(`Provisioned ${created} new, ${existing} already had logins${failed ? `, ${failed} skipped/failed` : ''}.`);
+    } catch (e: any) {
+      toast.error(e.message ?? 'Failed to provision logins');
+    } finally {
+      setProvisioningAuth(false);
+    }
+  };
+
+
   if (initialLoading) {
     return <LoadingScreen message="Loading dashboard..." />;
   }
