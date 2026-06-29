@@ -1,21 +1,48 @@
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { toast } from 'sonner';
-import { ClipboardCheck, ArrowLeft } from 'lucide-react';
+import { ClipboardCheck, ArrowLeft, GraduationCap, Shield } from 'lucide-react';
+
+const SYNTHETIC_DOMAIN = 'students.attendtrack.app';
+const matricToEmail = (matric: string) =>
+  `${matric.trim().toLowerCase().replace(/[^a-z0-9]/g, '')}@${SYNTHETIC_DOMAIN}`;
 
 const AuthPage = () => {
   const navigate = useNavigate();
+  const [params] = useSearchParams();
+  const nextPath = params.get('next') || '/';
+
+  const [mode, setMode] = useState<'student' | 'admin'>('student');
   const [isLogin, setIsLogin] = useState(true);
   const [email, setEmail] = useState('');
+  const [matricNo, setMatricNo] = useState('');
   const [password, setPassword] = useState('');
   const [name, setName] = useState('');
   const [loading, setLoading] = useState(false);
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleStudentLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!matricNo.trim()) return;
+    setLoading(true);
+    try {
+      const synthetic = matricToEmail(matricNo);
+      const pwd = password || matricNo.trim().toLowerCase();
+      const { error } = await supabase.auth.signInWithPassword({ email: synthetic, password: pwd });
+      if (error) throw error;
+      toast.success('Logged in');
+      navigate(nextPath);
+    } catch (err: any) {
+      toast.error(err.message || 'Login failed. Ask your course rep to create your login.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleAdminSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     try {
@@ -23,15 +50,11 @@ const AuthPage = () => {
         const { error } = await supabase.auth.signInWithPassword({ email, password });
         if (error) throw error;
         toast.success('Logged in successfully');
-        navigate('/');
+        navigate(nextPath);
       } else {
         const { error } = await supabase.auth.signUp({
-          email,
-          password,
-          options: {
-            data: { name },
-            emailRedirectTo: window.location.origin,
-          },
+          email, password,
+          options: { data: { name }, emailRedirectTo: window.location.origin },
         });
         if (error) throw error;
         toast.success('Account created! Check your email to confirm.');
@@ -55,49 +78,76 @@ const AuthPage = () => {
           <div className="mx-auto w-12 h-12 bg-primary rounded-xl flex items-center justify-center mb-2">
             <ClipboardCheck className="w-6 h-6 text-primary-foreground" />
           </div>
-          <CardTitle className="text-2xl">Attendance System</CardTitle>
-          <CardDescription>
-            {isLogin ? 'Sign in to your account' : 'Create a new account'}
-          </CardDescription>
+          <CardTitle className="text-2xl">AttendTrack</CardTitle>
+          <CardDescription>Sign in to your account</CardDescription>
         </CardHeader>
         <CardContent>
-          <form onSubmit={handleSubmit} className="space-y-4">
-            {!isLogin && (
-              <Input
-                placeholder="Full Name"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                required
-              />
-            )}
-            <Input
-              type="email"
-              placeholder="Email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              required
-            />
-            <Input
-              type="password"
-              placeholder="Password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              required
-              minLength={6}
-            />
-            <Button type="submit" className="w-full" disabled={loading}>
-              {loading ? 'Please wait...' : isLogin ? 'Sign In' : 'Sign Up'}
-            </Button>
-          </form>
-          <p className="text-center text-sm text-muted-foreground mt-4">
-            {isLogin ? "Don't have an account?" : 'Already have an account?'}{' '}
+          <div className="grid grid-cols-2 gap-2 mb-5 p-1 bg-muted rounded-lg">
             <button
-              onClick={() => setIsLogin(!isLogin)}
-              className="text-primary font-medium hover:underline"
+              onClick={() => setMode('student')}
+              className={`flex items-center justify-center gap-1.5 py-2 rounded-md text-sm font-medium transition ${mode === 'student' ? 'bg-background shadow' : 'text-muted-foreground'}`}
             >
-              {isLogin ? 'Sign Up' : 'Sign In'}
+              <GraduationCap className="w-4 h-4" /> Student
             </button>
-          </p>
+            <button
+              onClick={() => setMode('admin')}
+              className={`flex items-center justify-center gap-1.5 py-2 rounded-md text-sm font-medium transition ${mode === 'admin' ? 'bg-background shadow' : 'text-muted-foreground'}`}
+            >
+              <Shield className="w-4 h-4" /> Course Rep / Admin
+            </button>
+          </div>
+
+          {mode === 'student' ? (
+            <form onSubmit={handleStudentLogin} className="space-y-4">
+              <div>
+                <label className="text-sm font-medium">Matric Number</label>
+                <Input
+                  placeholder="e.g. AU25AC8017"
+                  value={matricNo}
+                  onChange={(e) => setMatricNo(e.target.value)}
+                  required
+                  autoCapitalize="characters"
+                />
+              </div>
+              <div>
+                <label className="text-sm font-medium">Password</label>
+                <Input
+                  type="password"
+                  placeholder="Default = your matric number"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                />
+                <p className="text-xs text-muted-foreground mt-1">
+                  Your first-time password is your matric number (lowercase).
+                </p>
+              </div>
+              <Button type="submit" className="w-full" disabled={loading}>
+                {loading ? 'Please wait...' : 'Sign In'}
+              </Button>
+              <p className="text-xs text-center text-muted-foreground">
+                No account yet? Ask your course rep to create your login.
+              </p>
+            </form>
+          ) : (
+            <>
+              <form onSubmit={handleAdminSubmit} className="space-y-4">
+                {!isLogin && (
+                  <Input placeholder="Full Name" value={name} onChange={(e) => setName(e.target.value)} required />
+                )}
+                <Input type="email" placeholder="Email" value={email} onChange={(e) => setEmail(e.target.value)} required />
+                <Input type="password" placeholder="Password" value={password} onChange={(e) => setPassword(e.target.value)} required minLength={6} />
+                <Button type="submit" className="w-full" disabled={loading}>
+                  {loading ? 'Please wait...' : isLogin ? 'Sign In' : 'Sign Up'}
+                </Button>
+              </form>
+              <p className="text-center text-sm text-muted-foreground mt-4">
+                {isLogin ? "Don't have an account?" : 'Already have an account?'}{' '}
+                <button onClick={() => setIsLogin(!isLogin)} className="text-primary font-medium hover:underline">
+                  {isLogin ? 'Sign Up' : 'Sign In'}
+                </button>
+              </p>
+            </>
+          )}
         </CardContent>
       </Card>
     </div>

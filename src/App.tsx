@@ -12,6 +12,7 @@ import AuthPage from "./pages/AuthPage.tsx";
 import NotFound from "./pages/NotFound.tsx";
 import InstallPage from "./pages/InstallPage.tsx";
 import CheckAttendance from "./pages/CheckAttendance.tsx";
+import ScanPage from "./pages/ScanPage.tsx";
 
 const queryClient = new QueryClient();
 
@@ -51,6 +52,7 @@ const App = () => (
               <Route path="/login" element={<AuthPage />} />
               <Route path="/install" element={<InstallPage />} />
               <Route path="/check-attendance" element={<CheckAttendance />} />
+              <Route path="/scan" element={<ScanPage />} />
               <Route path="*" element={<NotFound />} />
             </Routes>
           </BrowserRouter>
