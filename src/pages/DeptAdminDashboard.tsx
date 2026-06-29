@@ -87,6 +87,12 @@ const DeptAdminDashboard = () => {
   const [qrCreating, setQrCreating] = useState(false);
   const [provisioningAuth, setProvisioningAuth] = useState(false);
   const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    if (!qrSession) return;
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [qrSession]);
+
 
   const [showAddDialog, setShowAddDialog] = useState(false);
   const [newStudent, setNewStudent] = useState({ name: '', gender: '', matric_no: '' });
