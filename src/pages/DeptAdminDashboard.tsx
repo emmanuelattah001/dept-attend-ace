@@ -79,6 +79,14 @@ const DeptAdminDashboard = () => {
   const [syncingAttendance, setSyncingAttendance] = useState(false);
   const [sheetsBusy, setSheetsBusy] = useState<false | 'sync' | 'export'>(false);
   const [connectionStatus, setConnectionStatus] = useState<'online' | 'offline' | 'checking'>('checking');
+  const [showQrDialog, setShowQrDialog] = useState(false);
+  const [qrSession, setQrSession] = useState<{ token: string; expires_at: string; course_id: string; date: string } | null>(null);
+  const [qrCourseId, setQrCourseId] = useState<string>('');
+  const [qrDate, setQrDate] = useState<string>(new Date().toISOString().split('T')[0]);
+  const [qrDurationMin, setQrDurationMin] = useState<number>(15);
+  const [qrCreating, setQrCreating] = useState(false);
+  const [provisioningAuth, setProvisioningAuth] = useState(false);
+  const [now, setNow] = useState(Date.now());
 
   const [showAddDialog, setShowAddDialog] = useState(false);
   const [newStudent, setNewStudent] = useState({ name: '', gender: '', matric_no: '' });
