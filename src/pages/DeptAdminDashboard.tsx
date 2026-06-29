@@ -12,11 +12,12 @@ import { toast } from 'sonner';
 import { 
   CalendarCheck, Download, History, Users, Plus, Upload, Save, Trash2, 
   Check, X, CheckCheck, XCircle, Search, Database, BookOpen, AlertCircle, 
-  RefreshCw, WifiOff, Loader2 
+  RefreshCw, WifiOff, Loader2, QrCode, KeyRound, Copy
 } from 'lucide-react';
 import DashboardLayout from '@/components/DashboardLayout';
 import { SheetsActions } from '@/components/SheetsActions';
 import LoadingScreen from '@/components/LoadingScreen';
+import { QRCodeCanvas } from 'qrcode.react';
 import * as XLSX from "xlsx";
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
