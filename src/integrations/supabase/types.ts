@@ -110,6 +110,54 @@ export type Database = {
           },
         ]
       }
+      attendance_sessions: {
+        Row: {
+          course_id: string
+          created_at: string
+          created_by: string
+          date: string
+          department_id: string
+          expires_at: string
+          id: string
+          token: string
+        }
+        Insert: {
+          course_id: string
+          created_at?: string
+          created_by: string
+          date?: string
+          department_id: string
+          expires_at: string
+          id?: string
+          token: string
+        }
+        Update: {
+          course_id?: string
+          created_at?: string
+          created_by?: string
+          date?: string
+          department_id?: string
+          expires_at?: string
+          id?: string
+          token?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "attendance_sessions_course_id_fkey"
+            columns: ["course_id"]
+            isOneToOne: false
+            referencedRelation: "courses"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "attendance_sessions_department_id_fkey"
+            columns: ["department_id"]
+            isOneToOne: false
+            referencedRelation: "departments"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       courses: {
         Row: {
           code: string
@@ -206,6 +254,7 @@ export type Database = {
       }
       students: {
         Row: {
+          auth_user_id: string | null
           created_at: string | null
           department_id: string
           gender: string | null
@@ -214,6 +263,7 @@ export type Database = {
           name: string
         }
         Insert: {
+          auth_user_id?: string | null
           created_at?: string | null
           department_id: string
           gender?: string | null
@@ -222,6 +272,7 @@ export type Database = {
           name: string
         }
         Update: {
+          auth_user_id?: string | null
           created_at?: string | null
           department_id?: string
           gender?: string | null

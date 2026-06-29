@@ -12,11 +12,12 @@ import { toast } from 'sonner';
 import { 
   CalendarCheck, Download, History, Users, Plus, Upload, Save, Trash2, 
   Check, X, CheckCheck, XCircle, Search, Database, BookOpen, AlertCircle, 
-  RefreshCw, WifiOff, Loader2 
+  RefreshCw, WifiOff, Loader2, QrCode, KeyRound, Copy
 } from 'lucide-react';
 import DashboardLayout from '@/components/DashboardLayout';
 import { SheetsActions } from '@/components/SheetsActions';
 import LoadingScreen from '@/components/LoadingScreen';
+import { QRCodeCanvas } from 'qrcode.react';
 import * as XLSX from "xlsx";
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -78,6 +79,20 @@ const DeptAdminDashboard = () => {
   const [syncingAttendance, setSyncingAttendance] = useState(false);
   const [sheetsBusy, setSheetsBusy] = useState<false | 'sync' | 'export'>(false);
   const [connectionStatus, setConnectionStatus] = useState<'online' | 'offline' | 'checking'>('checking');
+  const [showQrDialog, setShowQrDialog] = useState(false);
+  const [qrSession, setQrSession] = useState<{ token: string; expires_at: string; course_id: string; date: string } | null>(null);
+  const [qrCourseId, setQrCourseId] = useState<string>('');
+  const [qrDate, setQrDate] = useState<string>(new Date().toISOString().split('T')[0]);
+  const [qrDurationMin, setQrDurationMin] = useState<number>(15);
+  const [qrCreating, setQrCreating] = useState(false);
+  const [provisioningAuth, setProvisioningAuth] = useState(false);
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    if (!qrSession) return;
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [qrSession]);
+
 
   const [showAddDialog, setShowAddDialog] = useState(false);
   const [newStudent, setNewStudent] = useState({ name: '', gender: '', matric_no: '' });
@@ -1035,6 +1050,57 @@ const DeptAdminDashboard = () => {
     { id: 'history' as const, label: 'History', icon: History },
   ];
 
+  // Live QR session helpers
+  const createQrSession = async () => {
+    if (!qrCourseId) { toast.error('Pick a course first'); return; }
+    if (!profile?.department_id || !user) { toast.error('Missing profile'); return; }
+    setQrCreating(true);
+    try {
+      const token = Array.from(crypto.getRandomValues(new Uint8Array(18)))
+        .map((b) => 'abcdefghijklmnopqrstuvwxyz0123456789'[b % 36]).join('');
+      const expires_at = new Date(Date.now() + qrDurationMin * 60_000).toISOString();
+      const { data, error } = await (supabase as any).from('attendance_sessions').insert({
+        course_id: qrCourseId,
+        department_id: profile.department_id,
+        date: qrDate,
+        token,
+        expires_at,
+        created_by: user.id,
+      }).select('token, expires_at, course_id, date').single();
+      if (error) throw error;
+      setQrSession(data);
+      toast.success('Live session started');
+    } catch (e: any) {
+      toast.error(e.message ?? 'Failed to start session');
+    } finally {
+      setQrCreating(false);
+    }
+  };
+
+  const endQrSession = async () => {
+    if (!qrSession) return;
+    await (supabase as any).from('attendance_sessions').update({ expires_at: new Date().toISOString() }).eq('token', qrSession.token);
+    setQrSession(null);
+    toast.message('Session ended');
+  };
+
+  const provisionStudentLogins = async () => {
+    setProvisioningAuth(true);
+    try {
+      const { data, error } = await supabase.functions.invoke('provision-student-auth', { body: {} });
+      if (error || (data as any)?.error) throw new Error((data as any)?.error || error?.message);
+      const created = (data as any)?.results?.filter((r: any) => r.status === 'created').length ?? 0;
+      const existing = (data as any)?.results?.filter((r: any) => r.status === 'already_provisioned').length ?? 0;
+      const failed = (data as any)?.results?.filter((r: any) => r.error || r.skipped).length ?? 0;
+      toast.success(`Provisioned ${created} new, ${existing} already had logins${failed ? `, ${failed} skipped/failed` : ''}.`);
+    } catch (e: any) {
+      toast.error(e.message ?? 'Failed to provision logins');
+    } finally {
+      setProvisioningAuth(false);
+    }
+  };
+
+
   if (initialLoading) {
     return <LoadingScreen message="Loading dashboard..." />;
   }
@@ -1150,6 +1216,13 @@ const DeptAdminDashboard = () => {
             ))}
           </div>
           <div className="flex flex-wrap gap-2">
+            <Button size="sm" variant="default" onClick={() => { setQrCourseId(selectedCourse || ''); setShowQrDialog(true); }}>
+              <QrCode className="w-4 h-4 mr-1" /> Live QR Session
+            </Button>
+            <Button size="sm" variant="outline" onClick={provisionStudentLogins} disabled={provisioningAuth}>
+              {provisioningAuth ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <KeyRound className="w-4 h-4 mr-1" />}
+              Create Student Logins
+            </Button>
             <SheetsActions
               busy={sheetsBusy}
               size="sm"
@@ -1158,6 +1231,75 @@ const DeptAdminDashboard = () => {
             />
           </div>
         </div>
+
+        <Dialog open={showQrDialog} onOpenChange={(o) => { setShowQrDialog(o); if (!o) { setQrSession(null); } }}>
+          <DialogContent className="max-w-md">
+            <DialogHeader><DialogTitle>Live QR Attendance Session</DialogTitle></DialogHeader>
+            {!qrSession ? (
+              <div className="space-y-3 pt-2">
+                <div>
+                  <label className="text-sm font-medium">Course</label>
+                  <Select value={qrCourseId} onValueChange={setQrCourseId}>
+                    <SelectTrigger><SelectValue placeholder="Pick a course" /></SelectTrigger>
+                    <SelectContent>
+                      {courses.map(c => (
+                        <SelectItem key={c.id} value={c.id}>{c.code} - {c.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <label className="text-sm font-medium">Date</label>
+                  <Input type="date" value={qrDate} onChange={e => setQrDate(e.target.value)} />
+                </div>
+                <div>
+                  <label className="text-sm font-medium">Duration</label>
+                  <Select value={String(qrDurationMin)} onValueChange={v => setQrDurationMin(Number(v))}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="5">5 minutes</SelectItem>
+                      <SelectItem value="15">15 minutes</SelectItem>
+                      <SelectItem value="30">30 minutes</SelectItem>
+                      <SelectItem value="60">1 hour</SelectItem>
+                      <SelectItem value="120">2 hours</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <Button onClick={createQrSession} disabled={qrCreating || !qrCourseId} className="w-full">
+                  {qrCreating ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <QrCode className="w-4 h-4 mr-2" />}
+                  Start session
+                </Button>
+                <p className="text-xs text-muted-foreground">
+                  Students scan the QR with the AttendTrack app (Scan QR button) to mark themselves present.
+                </p>
+              </div>
+            ) : (() => {
+              const scanUrl = `${window.location.origin}/scan?token=${qrSession.token}`;
+              const remainingMs = new Date(qrSession.expires_at).getTime() - now;
+              const remaining = Math.max(0, Math.floor(remainingMs / 1000));
+              const mm = Math.floor(remaining / 60).toString().padStart(2, '0');
+              const ss = (remaining % 60).toString().padStart(2, '0');
+              const expired = remainingMs <= 0;
+              return (
+                <div className="space-y-3 pt-2 text-center">
+                  <div className="bg-white p-4 rounded-lg inline-block mx-auto">
+                    <QRCodeCanvas value={scanUrl} size={240} includeMargin />
+                  </div>
+                  <p className="text-2xl font-mono font-bold">{expired ? 'EXPIRED' : `${mm}:${ss}`}</p>
+                  <p className="text-xs text-muted-foreground break-all">{scanUrl}</p>
+                  <div className="flex gap-2 justify-center">
+                    <Button size="sm" variant="outline" onClick={() => { navigator.clipboard.writeText(scanUrl); toast.success('Link copied'); }}>
+                      <Copy className="w-4 h-4 mr-1" /> Copy link
+                    </Button>
+                    <Button size="sm" variant="destructive" onClick={endQrSession}>End session</Button>
+                  </div>
+                </div>
+              );
+            })()}
+          </DialogContent>
+        </Dialog>
+
+
 
 
         {activeTab === 'mark' && (

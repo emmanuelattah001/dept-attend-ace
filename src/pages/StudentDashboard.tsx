@@ -1,9 +1,11 @@
 import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { CalendarCheck, CheckCircle, XCircle } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { CalendarCheck, CheckCircle, XCircle, QrCode } from 'lucide-react';
 import DashboardLayout from '@/components/DashboardLayout';
 import LoadingScreen from '@/components/LoadingScreen';
 
@@ -16,6 +18,7 @@ interface AttendanceRecord {
 
 const StudentDashboard = () => {
   const { user } = useAuth();
+  const navigate = useNavigate();
   const [records, setRecords] = useState<AttendanceRecord[]>([]);
   const [stats, setStats] = useState({ present: 0, absent: 0 });
   const [initialLoading, setInitialLoading] = useState(true);
@@ -87,9 +90,14 @@ const StudentDashboard = () => {
   return (
     <DashboardLayout>
       <div className="space-y-6">
-        <div>
-          <h2 className="text-2xl font-heading font-bold">My Attendance</h2>
-          <p className="text-muted-foreground text-sm mt-1">View your attendance records</p>
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h2 className="text-2xl font-heading font-bold">My Attendance</h2>
+            <p className="text-muted-foreground text-sm mt-1">View your attendance records</p>
+          </div>
+          <Button size="lg" onClick={() => navigate('/scan')}>
+            <QrCode className="w-5 h-5 mr-2" /> Scan QR to Mark Attendance
+          </Button>
         </div>
 
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
