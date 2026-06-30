@@ -14,6 +14,7 @@ interface AttendanceRecord {
   date: string;
   status: string;
   departments: { name: string } | null;
+  courses?: { name: string; code: string | null } | null;
 }
 
 const StudentDashboard = () => {
@@ -26,25 +27,24 @@ const StudentDashboard = () => {
   useEffect(() => {
     if (!user) return;
     const fetchAttendance = async () => {
-      // Look up this user's student row to get matric_no for sheet lookup
-      const { data: profile } = await supabase
-        .from('profiles')
-        .select('email, name')
-        .eq('user_id', user.id)
-        .maybeSingle();
-
-      const { data: studentRow } = await supabase
+      const { data: studentRow, error: studentError } = await supabase
         .from('students')
         .select('id, matric_no')
-        .or(`email.eq.${profile?.email ?? ''},name.eq.${profile?.name ?? ''}`)
+        .eq('auth_user_id', user.id)
         .maybeSingle();
 
+      if (studentError) {
+        console.error('Student lookup failed:', studentError);
+      }
+
       const [dbRes, sheetRes] = await Promise.all([
-        supabase
-          .from('attendance')
-          .select('id, date, status, departments(name)')
-          .eq('student_id', user.id)
-          .order('date', { ascending: false }),
+        studentRow?.id
+          ? supabase
+              .from('attendance')
+              .select('id, date, status, departments(name), courses(name, code)')
+              .eq('student_ref', studentRow.id)
+              .order('date', { ascending: false })
+          : Promise.resolve({ data: [], error: null } as any),
         studentRow?.matric_no
           ? supabase.functions.invoke('sheets-sync', {
               body: { action: 'lookup_by_matric', matric_no: studentRow.matric_no },
@@ -54,13 +54,16 @@ const StudentDashboard = () => {
 
       const seen = new Set<string>();
       const merged: AttendanceRecord[] = [];
-      const push = (id: string, date: string, status: string, deptName: string | null) => {
-        const key = `${date}|${(status || '').toLowerCase()}`;
+      const push = (id: string, date: string, status: string, deptName: string | null, course?: AttendanceRecord['courses']) => {
+        const key = `${date}|${(status || '').toLowerCase()}|${course?.code ?? course?.name ?? ''}`;
         if (!date || seen.has(key)) return;
         seen.add(key);
-        merged.push({ id, date, status, departments: deptName ? { name: deptName } : null });
+        merged.push({ id, date, status, departments: deptName ? { name: deptName } : null, courses: course ?? null });
       };
-      for (const r of (dbRes.data ?? []) as any[]) push(r.id, r.date, r.status, r.departments?.name ?? null);
+      if (dbRes.error) {
+        console.error('Attendance lookup failed:', dbRes.error);
+      }
+      for (const r of (dbRes.data ?? []) as any[]) push(r.id, r.date, r.status, r.departments?.name ?? null, r.courses ?? null);
       for (const r of (sheetRes.data?.rows ?? []) as any[]) push(`sheet-${r.date}-${r.status}`, r.date, r.status, null);
       merged.sort((a, b) => b.date.localeCompare(a.date));
 
@@ -135,6 +138,7 @@ const StudentDashboard = () => {
                   <TableRow>
                     <TableHead>Date</TableHead>
                     <TableHead>Department</TableHead>
+                    <TableHead>Course</TableHead>
                     <TableHead>Status</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -143,6 +147,7 @@ const StudentDashboard = () => {
                     <TableRow key={r.id}>
                       <TableCell>{r.date}</TableCell>
                       <TableCell>{r.departments?.name ?? '-'}</TableCell>
+                      <TableCell>{r.courses ? `${r.courses.code ? r.courses.code + ' - ' : ''}${r.courses.name}` : '-'}</TableCell>
                       <TableCell>
                         <span className={`text-xs px-2 py-0.5 rounded-full font-medium capitalize ${statusStyles[r.status] || 'bg-muted'}`}>
                           {r.status}
@@ -152,7 +157,7 @@ const StudentDashboard = () => {
                   ))}
                   {records.length === 0 && (
                     <TableRow>
-                      <TableCell colSpan={3} className="text-center text-muted-foreground">
+                      <TableCell colSpan={4} className="text-center text-muted-foreground">
                         No attendance records yet
                       </TableCell>
                     </TableRow>
