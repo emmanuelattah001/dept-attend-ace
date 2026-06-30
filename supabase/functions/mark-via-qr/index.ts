@@ -71,7 +71,7 @@ Deno.serve(async (req) => {
 
     return new Response(JSON.stringify({
       ok: true,
-      course: (session as any).courses,
+      course,
       date: session.date,
       student: { name: student.name, matric_no: student.matric_no },
     }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
