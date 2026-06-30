@@ -31,11 +31,18 @@ Deno.serve(async (req) => {
     // Load session
     const { data: session, error: sErr } = await admin
       .from('attendance_sessions')
-      .select('id, course_id, department_id, date, expires_at, courses(name, code)')
+      .select('id, course_id, department_id, date, expires_at')
       .eq('token', token)
       .maybeSingle();
 
+    if (sErr) console.error('session lookup error', sErr);
     if (sErr || !session) return new Response(JSON.stringify({ error: 'Invalid QR code' }), { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+
+    const { data: course } = await admin
+      .from('courses')
+      .select('name, code')
+      .eq('id', session.course_id)
+      .maybeSingle();
     if (new Date(session.expires_at) < new Date()) return new Response(JSON.stringify({ error: 'QR code has expired' }), { status: 410, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
 
     // Find student by auth_user_id
@@ -64,7 +71,7 @@ Deno.serve(async (req) => {
 
     return new Response(JSON.stringify({
       ok: true,
-      course: (session as any).courses,
+      course,
       date: session.date,
       student: { name: student.name, matric_no: student.matric_no },
     }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
