@@ -1,7 +1,7 @@
 <?xml version='1.0' encoding='utf-8'?>
 <resources>
-    <string name="app_name">attendtrack</string>
-    <string name="title_activity_main">attendtrack</string>
+    <string name="app_name">AttendTrack</string>
+    <string name="title_activity_main">Attendtrack</string>
     <string name="package_name">com.emmytech.attendance</string>
     <string name="custom_url_scheme">com.emmytech.attendance</string>
 </resources>
