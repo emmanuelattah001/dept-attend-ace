@@ -66,7 +66,7 @@ const LandingPage = () => {
                 <Search className="w-5 h-5 mr-2" /> Check My Attendance
               </Button>
               <Button onClick={() => navigate('/login')} variant="outline" size="lg" className="text-base">
-                <LogIn className="w-5 h-5 mr-2" /> Course Rep's
+                <LogIn className="w-5 h-5 mr-2" /> login
               </Button>
             </div>
           </div>
