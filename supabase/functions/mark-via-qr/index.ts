@@ -31,7 +31,7 @@ Deno.serve(async (req) => {
     // Load session
     const { data: session, error: sErr } = await admin
       .from('attendance_sessions')
-      .select('id, course_id, department_id, date, expires_at')
+      .select('id, course_id, department_id, date, expires_at, created_by')
       .eq('token', token)
       .maybeSingle();
 
@@ -59,12 +59,14 @@ Deno.serve(async (req) => {
     const { error: upErr } = await admin
       .from('attendance')
       .upsert({
+        student_id: user.id,
         student_ref: student.id,
         course_id: session.course_id,
         department_id: session.department_id,
         date: session.date,
         status: 'present',
-        marked_by: user.id,
+        marked_by: session.created_by,
+        synced_to_sheets: false,
       }, { onConflict: 'student_ref,course_id,date' });
 
     if (upErr) throw upErr;
