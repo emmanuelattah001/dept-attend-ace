@@ -1327,11 +1327,11 @@ const DeptAdminDashboard = () => {
                   <Button variant="outline" onClick={exportExcel} disabled={students.length === 0}>
                     <Download className="w-4 h-4 mr-1" /> Excel
                   </Button>
-                  <SheetsActions
+                  {/* <SheetsActions
                     busy={sheetsBusy}
                     onExport={() => pushToGoogleSheets('export_all')}
                     onSync={() => pushToGoogleSheets('sync_unsynced')}
-                  />
+                  /> */}
                   <Button onClick={sharePDF} disabled={history.length === 0}>
                     <Download className="w-4 h-4 mr-1" /> Share PDF
                   </Button>
@@ -1618,12 +1618,12 @@ const DeptAdminDashboard = () => {
               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                 <CardTitle className="text-lg">Attendance History</CardTitle>
                 <div className="flex flex-wrap gap-2">
-                  <SheetsActions
+                  {/* <SheetsActions
                     busy={sheetsBusy}
                     size="sm"
                     onExport={() => pushToGoogleSheets('export_all')}
                     onSync={() => pushToGoogleSheets('sync_unsynced')}
-                  />
+                  /> */}
                   <Button
                     variant="destructive"
                     size="sm"
