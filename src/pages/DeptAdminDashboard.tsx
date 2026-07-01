@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import DashboardLayout from '@/components/DashboardLayout';
 import { SheetsActions } from '@/components/SheetsActions';
+import { ProgressSummary } from '@/components/ProgressSummary';
 import LoadingScreen from '@/components/LoadingScreen';
 import { QRCodeCanvas } from 'qrcode.react';
 import * as XLSX from "xlsx";
@@ -1131,6 +1132,9 @@ const DeptAdminDashboard = () => {
             )}
           </div>
         </div>
+
+        <ProgressSummary department={departmentName} />
+
 
         <Card>
           <CardHeader>
