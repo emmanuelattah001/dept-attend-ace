@@ -72,8 +72,7 @@ const StudentDashboard = () => {
   }, [user]);
 
 
-  const total = stats.present + stats.absent;
-  const percentage = total > 0 ? Math.round((stats.present / total) * 100) : 0;
+  const percentage = stats.percentage;
 
   const statusStyles: Record<string, string> = {
     present: 'bg-success text-success-foreground',
