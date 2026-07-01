@@ -1,349 +1,278 @@
-// Google Sheets sync edge function
-// Actions: append (records[]), sync_unsynced, export_all
+// Google Sheets sync: two tabs
+//   Attendance      — append-only log of every attendance row (dedup by attendance_id)
+//   Student Progress — one row per (matric_no, course_code); percentage precomputed here
+//
+// Public action: lookup_by_matric  (reads Attendance tab)
+// Auth actions : append | sync_unsynced | export_all
 import { createClient } from 'npm:@supabase/supabase-js@2';
 import { corsHeaders } from 'npm:@supabase/supabase-js@2/cors';
 
-const SHEET_TAB = 'Attendance';
-const HEADER_ROW = ['student_id', 'student_name', 'date', 'status', 'marked_by'];
+const ATTENDANCE_TAB = 'Attendance';
+const PROGRESS_TAB = 'Student Progress';
 
-function quoteSheetName(title: string): string {
-  return `'${title.replace(/'/g, "''")}'`;
-}
+const ATTENDANCE_HEADER = [
+  'attendance_id', 'student_name', 'matric_no', 'gender', 'department',
+  'course_code', 'course_name', 'attendance_date', 'status', 'synced_at',
+];
+const PROGRESS_HEADER = [
+  'Student Name', 'Matric No', 'Department', 'Course',
+  'Total Present', 'Total Absent', 'Total Classes',
+  'Attendance Percentage', 'Last Attendance Date', 'Last Status',
+];
 
-function sheetRange(title: string, range: string): string {
-  return `${quoteSheetName(title)}!${range}`;
-}
+// ---------- helpers ----------
+const q = (t: string) => `'${t.replace(/'/g, "''")}'`;
+const range = (t: string, r: string) => `${q(t)}!${r}`;
 
-// ---------- Google auth (service account JWT -> access token) ----------
 function pemToArrayBuffer(pem: string): ArrayBuffer {
-  const b64 = pem
-    .replace(/-----BEGIN PRIVATE KEY-----/, '')
-    .replace(/-----END PRIVATE KEY-----/, '')
-    .replace(/\s+/g, '');
+  const b64 = pem.replace(/-----BEGIN PRIVATE KEY-----/, '').replace(/-----END PRIVATE KEY-----/, '').replace(/\s+/g, '');
   const bin = atob(b64);
   const buf = new Uint8Array(bin.length);
   for (let i = 0; i < bin.length; i++) buf[i] = bin.charCodeAt(i);
   return buf.buffer;
 }
-
-function base64UrlEncode(data: Uint8Array | string): string {
+function b64url(data: Uint8Array | string): string {
   const bytes = typeof data === 'string' ? new TextEncoder().encode(data) : data;
-  let s = btoa(String.fromCharCode(...bytes));
-  return s.replace(/=+$/, '').replace(/\+/g, '-').replace(/\//g, '_');
+  return btoa(String.fromCharCode(...bytes)).replace(/=+$/, '').replace(/\+/g, '-').replace(/\//g, '_');
 }
-
-async function getAccessToken(serviceAccount: any): Promise<string> {
+async function getAccessToken(sa: any): Promise<string> {
   const iat = Math.floor(Date.now() / 1000);
-  const header = { alg: 'RS256', typ: 'JWT' };
   const claims = {
-    iss: serviceAccount.client_email,
-    scope: 'https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/drive.file',
-    aud: 'https://oauth2.googleapis.com/token',
-    iat,
-    exp: iat + 3600,
+    iss: sa.client_email,
+    scope: 'https://www.googleapis.com/auth/spreadsheets',
+    aud: 'https://oauth2.googleapis.com/token', iat, exp: iat + 3600,
   };
-  const signingInput = `${base64UrlEncode(JSON.stringify(header))}.${base64UrlEncode(JSON.stringify(claims))}`;
-  const key = await crypto.subtle.importKey(
-    'pkcs8',
-    pemToArrayBuffer(serviceAccount.private_key),
-    { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' },
-    false,
-    ['sign'],
-  );
+  const signingInput = `${b64url(JSON.stringify({ alg: 'RS256', typ: 'JWT' }))}.${b64url(JSON.stringify(claims))}`;
+  const key = await crypto.subtle.importKey('pkcs8', pemToArrayBuffer(sa.private_key), { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' }, false, ['sign']);
   const sig = new Uint8Array(await crypto.subtle.sign('RSASSA-PKCS1-v1_5', key, new TextEncoder().encode(signingInput)));
-  const jwt = `${signingInput}.${base64UrlEncode(sig)}`;
-
+  const jwt = `${signingInput}.${b64url(sig)}`;
   const resp = await fetch('https://oauth2.googleapis.com/token', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({
-      grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer',
-      assertion: jwt,
-    }),
+    method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({ grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer', assertion: jwt }),
   });
   const data = await resp.json();
   if (!resp.ok) throw new Error(`Google token error: ${JSON.stringify(data)}`);
   return data.access_token;
 }
 
-// ---------- Sheets helpers ----------
-async function createSpreadsheet(token: string, title: string): Promise<string> {
-  const resp = await fetch('https://sheets.googleapis.com/v4/spreadsheets', {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      properties: { title },
-      sheets: [{ properties: { title: SHEET_TAB } }],
-    }),
+async function api(token: string, path: string, init: RequestInit = {}) {
+  const resp = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${path}`, {
+    ...init,
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', ...(init.headers ?? {}) },
   });
-  const data = await resp.json();
-  if (!resp.ok) throw new Error(`Sheets create failed: ${JSON.stringify(data)}`);
-  const id = data.spreadsheetId as string;
-
-  // Write header row
-  await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${id}/values/${sheetRange(SHEET_TAB, 'A1:E1')}?valueInputOption=RAW`, {
-    method: 'PUT',
-    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ values: [HEADER_ROW] }),
-  });
-  return id;
-}
-
-async function appendRows(token: string, spreadsheetId: string, tabTitle: string, rows: any[][]) {
-  const resp = await fetch(
-    `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${sheetRange(tabTitle, 'A:E')}:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`,
-    {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ values: rows }),
-    },
-  );
-  const data = await resp.json();
-  if (!resp.ok) throw new Error(`Sheets append failed: ${JSON.stringify(data)}`);
+  const data = await resp.json().catch(() => ({}));
+  if (!resp.ok) throw new Error(`Sheets ${path}: ${JSON.stringify(data)}`);
   return data;
 }
 
-async function clearSheetRows(token: string, spreadsheetId: string, tabTitle: string) {
-  const resp = await fetch(
-    `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${sheetRange(tabTitle, 'A:E')}:clear`,
-    {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({}),
-    },
-  );
-  const data = await resp.json();
-  if (!resp.ok) throw new Error(`Sheets clear failed: ${JSON.stringify(data)}`);
-}
-
-async function writeRows(token: string, spreadsheetId: string, tabTitle: string, rows: any[][]) {
-  const resp = await fetch(
-    `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${sheetRange(tabTitle, 'A1:E' + rows.length)}?valueInputOption=RAW`,
-    {
-      method: 'PUT',
-      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ values: rows }),
-    },
-  );
-  const data = await resp.json();
-  if (!resp.ok) throw new Error(`Sheets write failed: ${JSON.stringify(data)}`);
-}
-
-async function getTargetSheetTitle(token: string, spreadsheetId: string): Promise<string> {
-  const metaResp = await fetch(
-    `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}?fields=sheets.properties(title)`,
-    { headers: { Authorization: `Bearer ${token}` } },
-  );
-  const meta = await metaResp.json();
-  if (!metaResp.ok) throw new Error(`Sheets metadata read failed: ${JSON.stringify(meta)}`);
+async function ensureTabs(token: string, sid: string) {
+  const meta = await api(token, `${sid}?fields=sheets.properties(title)`);
   const titles: string[] = (meta.sheets ?? []).map((s: any) => s.properties?.title).filter(Boolean);
+  const requests: any[] = [];
+  if (!titles.includes(ATTENDANCE_TAB)) requests.push({ addSheet: { properties: { title: ATTENDANCE_TAB } } });
+  if (!titles.includes(PROGRESS_TAB)) requests.push({ addSheet: { properties: { title: PROGRESS_TAB } } });
+  if (requests.length) await api(token, `${sid}:batchUpdate`, { method: 'POST', body: JSON.stringify({ requests }) });
 
-  // Use the first visible tab in the user's spreadsheet, so the sheet they opened
-  // (usually gid=0) is populated instead of silently writing to a new tab.
-  if (titles.length) return titles[0];
-
-  const addResp = await fetch(
-    `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}:batchUpdate`,
-    {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ requests: [{ addSheet: { properties: { title: SHEET_TAB } } }] }),
-    },
-  );
-  const addData = await addResp.json();
-  if (!addResp.ok) throw new Error(`Sheets tab create failed: ${JSON.stringify(addData)}`);
-  return SHEET_TAB;
-}
-
-async function ensureHeader(token: string, spreadsheetId: string, tabTitle: string) {
-  // Read row 1
-  const getResp = await fetch(
-    `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${sheetRange(tabTitle, 'A1:E1')}`,
-    { headers: { Authorization: `Bearer ${token}` } },
-  );
-  const getData = await getResp.json();
-  if (!getResp.ok) throw new Error(`Sheets header read failed: ${JSON.stringify(getData)}`);
-  const current: string[] = getData.values?.[0] ?? [];
-  const matches = HEADER_ROW.every((h, i) => current[i] === h);
-  if (matches) return;
-  const putResp = await fetch(
-    `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${sheetRange(tabTitle, 'A1:E1')}?valueInputOption=RAW`,
-    {
-      method: 'PUT',
-      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ values: [HEADER_ROW] }),
-    },
-  );
-  const putData = await putResp.json();
-  if (!putResp.ok) throw new Error(`Sheets header write failed: ${JSON.stringify(putData)}`);
-}
-
-async function fetchAttendanceRows(admin: any, action: string, ids?: string[]) {
-  const pageSize = 1000;
-  let from = 0;
-  const allRows: any[] = [];
-
-  while (true) {
-    let query = admin
-      .from('attendance')
-      .select('id, date, status, created_at, marked_by, synced_to_sheets, student_ref, students:student_ref(name, matric_no)')
-      .order('date', { ascending: true })
-      .range(from, from + pageSize - 1);
-
-    if (action === 'append' && Array.isArray(ids) && ids.length) {
-      query = query.in('id', ids);
-    } else if (action === 'sync_unsynced') {
-      query = query.eq('synced_to_sheets', false);
-    }
-
-    const { data, error } = await query;
-    if (error) throw error;
-
-    allRows.push(...(data ?? []));
-    if (!data || data.length < pageSize) break;
-    from += pageSize;
-  }
-
-  return allRows.sort((a, b) => {
-    const byDate = String(a.date ?? '').localeCompare(String(b.date ?? ''));
-    if (byDate !== 0) return byDate;
-    const byName = String(a.students?.name ?? '').localeCompare(String(b.students?.name ?? ''));
-    if (byName !== 0) return byName;
-    return String(a.status ?? '').localeCompare(String(b.status ?? ''));
+  // headers
+  await api(token, `${sid}/values:batchUpdate`, {
+    method: 'POST',
+    body: JSON.stringify({
+      valueInputOption: 'RAW',
+      data: [
+        { range: range(ATTENDANCE_TAB, `A1:${String.fromCharCode(64 + ATTENDANCE_HEADER.length)}1`), values: [ATTENDANCE_HEADER] },
+        { range: range(PROGRESS_TAB, `A1:${String.fromCharCode(64 + PROGRESS_HEADER.length)}1`), values: [PROGRESS_HEADER] },
+      ],
+    }),
   });
 }
 
-// ---------- Sheet read helper ----------
-async function readAllSheetRows(token: string, spreadsheetId: string, tabTitle: string): Promise<string[][]> {
-  const resp = await fetch(
-    `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${sheetRange(tabTitle, 'A2:E')}`,
-    { headers: { Authorization: `Bearer ${token}` } },
-  );
-  const data = await resp.json();
-  if (!resp.ok) throw new Error(`Sheets read failed: ${JSON.stringify(data)}`);
+async function readAttendanceIds(token: string, sid: string): Promise<Set<string>> {
+  const data = await api(token, `${sid}/values/${range(ATTENDANCE_TAB, 'A2:A')}`);
+  const ids = new Set<string>();
+  for (const row of (data.values ?? []) as string[][]) if (row[0]) ids.add(row[0]);
+  return ids;
+}
+
+async function readAttendanceRows(token: string, sid: string): Promise<string[][]> {
+  const data = await api(token, `${sid}/values/${range(ATTENDANCE_TAB, `A2:${String.fromCharCode(64 + ATTENDANCE_HEADER.length)}`)}`);
   return (data.values ?? []) as string[][];
 }
 
-// ---------- Main ----------
+async function appendRows(token: string, sid: string, tab: string, rows: any[][]) {
+  if (!rows.length) return;
+  const width = String.fromCharCode(64 + rows[0].length);
+  const CHUNK = 500;
+  for (let i = 0; i < rows.length; i += CHUNK) {
+    const slice = rows.slice(i, i + CHUNK);
+    await api(token, `${sid}/values/${range(tab, `A:${width}`)}:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`, {
+      method: 'POST', body: JSON.stringify({ values: slice }),
+    });
+  }
+}
+
+async function overwriteTab(token: string, sid: string, tab: string, header: string[], rows: any[][]) {
+  const width = String.fromCharCode(64 + header.length);
+  await api(token, `${sid}/values/${range(tab, `A:${width}`)}:clear`, { method: 'POST', body: '{}' });
+  const values = [header, ...rows];
+  await api(token, `${sid}/values/${range(tab, `A1:${width}${values.length}`)}?valueInputOption=RAW`, {
+    method: 'PUT', body: JSON.stringify({ values }),
+  });
+}
+
+// ---------- attendance fetch ----------
+async function fetchAttendance(admin: any, action: string, ids?: string[]) {
+  const pageSize = 1000;
+  let from = 0;
+  const all: any[] = [];
+  while (true) {
+    let query = admin.from('attendance')
+      .select('id, date, status, created_at, marked_by, synced_to_sheets, student_ref, department_id, course_id, students:student_ref(name, matric_no, gender), departments:department_id(name), courses:course_id(name, code)')
+      .order('created_at', { ascending: true })
+      .range(from, from + pageSize - 1);
+    if (action === 'append' && Array.isArray(ids) && ids.length) query = query.in('id', ids);
+    else if (action === 'sync_unsynced') query = query.eq('synced_to_sheets', false);
+    const { data, error } = await query;
+    if (error) throw error;
+    all.push(...(data ?? []));
+    if (!data || data.length < pageSize) break;
+    from += pageSize;
+  }
+  return all;
+}
+
+// ---------- progress rebuild ----------
+function buildProgress(rows: string[][]) {
+  // rows: attendance_id, student_name, matric_no, gender, department, course_code, course_name, date, status, synced_at
+  const map = new Map<string, {
+    name: string; matric: string; dept: string; course: string;
+    present: number; absent: number; total: number;
+    lastDate: string; lastStatus: string;
+  }>();
+  for (const r of rows) {
+    const [, name, matric, , dept, courseCode, courseName, date, status] = r;
+    const courseLabel = courseCode ? (courseName ? `${courseCode} - ${courseName}` : courseCode) : (courseName ?? '');
+    const key = `${(matric || '').toLowerCase()}|${(courseCode || courseName || '').toLowerCase()}`;
+    const rec = map.get(key) ?? {
+      name: name ?? '', matric: matric ?? '', dept: dept ?? '', course: courseLabel,
+      present: 0, absent: 0, total: 0, lastDate: '', lastStatus: '',
+    };
+    const s = (status || '').toLowerCase();
+    if (s === 'present') rec.present++;
+    else if (s === 'absent') rec.absent++;
+    rec.total = rec.present + rec.absent;
+    if (!rec.lastDate || (date && date > rec.lastDate)) { rec.lastDate = date ?? ''; rec.lastStatus = status ?? ''; }
+    // keep freshest identity fields
+    if (name) rec.name = name;
+    if (dept) rec.dept = dept;
+    if (courseLabel) rec.course = courseLabel;
+    map.set(key, rec);
+  }
+  const out: any[][] = [];
+  for (const r of map.values()) {
+    const pct = r.total ? Math.round((r.present / r.total) * 1000) / 10 : 0;
+    out.push([r.name, r.matric, r.dept, r.course, r.present, r.absent, r.total, pct, r.lastDate, r.lastStatus]);
+  }
+  out.sort((a, b) => String(a[1]).localeCompare(String(b[1])) || String(a[3]).localeCompare(String(b[3])));
+  return out;
+}
+
+// ---------- main ----------
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
-
   try {
     const body = await req.json().catch(() => ({}));
     const action: 'append' | 'sync_unsynced' | 'export_all' | 'lookup_by_matric' = body.action || 'sync_unsynced';
 
     const saJson = Deno.env.get('GOOGLE_SERVICE_ACCOUNT_JSON');
     if (!saJson) throw new Error('GOOGLE_SERVICE_ACCOUNT_JSON not configured');
-    const serviceAccount = JSON.parse(saJson);
+    const sa = JSON.parse(saJson);
     const admin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
-    const accessToken = await getAccessToken(serviceAccount);
-    const { data: settingRow } = await admin.from('app_settings').select('value').eq('key', 'google_sheet_id').maybeSingle();
-    const spreadsheetIdFromStore: string | undefined = (settingRow?.value as any)?.id ?? Deno.env.get('GOOGLE_SHEET_ID') ?? undefined;
+    const token = await getAccessToken(sa);
 
-    // ---- Public action: lookup attendance from the sheet by matric number ----
+    const { data: settingRow } = await admin.from('app_settings').select('value').eq('key', 'google_sheet_id').maybeSingle();
+    const sid: string | undefined = (settingRow?.value as any)?.id ?? Deno.env.get('GOOGLE_SHEET_ID') ?? undefined;
+    if (!sid) throw new Error('GOOGLE_SHEET_ID not configured. Set the secret or app_settings.google_sheet_id.');
+
+    // public lookup
     if (action === 'lookup_by_matric') {
       const matric = String(body.matric_no ?? '').trim().toLowerCase();
-      if (!matric) {
-        return new Response(JSON.stringify({ ok: false, error: 'matric_no required' }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
-      }
-      if (!spreadsheetIdFromStore) {
-        return new Response(JSON.stringify({ ok: true, rows: [] }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
-      }
-      const targetSheetTitle = await getTargetSheetTitle(accessToken, spreadsheetIdFromStore);
-      const all = await readAllSheetRows(accessToken, spreadsheetIdFromStore, targetSheetTitle);
-      const rows = all
-        .filter((r) => String(r[0] ?? '').trim().toLowerCase() === matric)
-        .map((r) => ({ student_id: r[0], student_name: r[1], date: r[2], status: r[3], marked_by: r[4] }));
+      if (!matric) return new Response(JSON.stringify({ ok: false, error: 'matric_no required' }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      await ensureTabs(token, sid);
+      const all = await readAttendanceRows(token, sid);
+      const rows = all.filter(r => (r[2] ?? '').toLowerCase() === matric).map(r => ({
+        attendance_id: r[0], student_name: r[1], matric_no: r[2], gender: r[3], department: r[4],
+        course_code: r[5], course_name: r[6], date: r[7], status: r[8], synced_at: r[9],
+      }));
       return new Response(JSON.stringify({ ok: true, rows }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
-    // ---- Authenticated actions below ----
+    // auth check for other actions
     const authHeader = req.headers.get('Authorization');
-    if (!authHeader?.startsWith('Bearer ')) {
-      return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
-    }
-    const supabase = createClient(
-      Deno.env.get('SUPABASE_URL')!,
-      Deno.env.get('SUPABASE_ANON_KEY')!,
-      { global: { headers: { Authorization: authHeader } } },
-    );
-    const token = authHeader.replace('Bearer ', '');
-    const { data: claims, error: claimsErr } = await supabase.auth.getClaims(token);
-    if (claimsErr || !claims?.claims) {
-      return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
-    }
+    if (!authHeader?.startsWith('Bearer ')) return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    const sb = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_ANON_KEY')!, { global: { headers: { Authorization: authHeader } } });
+    const { data: claims, error: cerr } = await sb.auth.getClaims(authHeader.replace('Bearer ', ''));
+    if (cerr || !claims?.claims) return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
 
-    const rows = await fetchAttendanceRows(admin, action, body.ids);
+    await ensureTabs(token, sid);
 
-    // Resolve marked_by -> profile name
-    const markerIds = Array.from(new Set(rows.map((r: any) => r.marked_by).filter(Boolean)));
+    const dbRows = await fetchAttendance(admin, action, body.ids);
+    console.log(`sheets-sync[${action}]: fetched ${dbRows.length} rows`);
+
+    // marker names
+    const markerIds = Array.from(new Set(dbRows.map((r: any) => r.marked_by).filter(Boolean)));
     const markerMap = new Map<string, string>();
     if (markerIds.length) {
       const { data: markers } = await admin.from('profiles').select('user_id, name, email').in('user_id', markerIds);
       for (const m of markers ?? []) markerMap.set(m.user_id, m.name || m.email || m.user_id);
     }
 
-    // Resolve spreadsheet ID (accessToken already created above)
-    let spreadsheetId: string | undefined = spreadsheetIdFromStore;
-
-
-    if (!spreadsheetId) {
-      try {
-        spreadsheetId = await createSpreadsheet(accessToken, `Attendance Archive — ${new Date().toISOString().slice(0, 10)}`);
-        await admin.from('app_settings').upsert({ key: 'google_sheet_id', value: { id: spreadsheetId, created_at: new Date().toISOString() } });
-      } catch (e) {
-        const sa = serviceAccount.client_email ?? 'your service account';
-        throw new Error(
-          `Could not auto-create a spreadsheet (service accounts have no Drive quota). ` +
-          `Create a Google Sheet in your own Drive, share it with ${sa} as Editor, ` +
-          `then either set the GOOGLE_SHEET_ID secret to its ID or insert it into app_settings ` +
-          `(key='google_sheet_id', value={"id":"<SHEET_ID>"}). Original error: ${(e as Error).message}`
-        );
-      }
-    }
-
-    const targetSheetTitle = await getTargetSheetTitle(accessToken, spreadsheetId);
-
-    // Make sure the header row matches the expected columns on the visible sheet tab.
-    await ensureHeader(accessToken, spreadsheetId, targetSheetTitle);
-
-    if (!rows || rows.length === 0) {
-      return new Response(JSON.stringify({ ok: true, synced: 0, spreadsheetId, sheet: targetSheetTitle, message: 'No records to sync' }), {
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      });
-    }
-
-    const values = rows.map((r: any) => [
-      r.students?.matric_no ?? r.student_ref ?? '',
-      r.students?.name ?? '',
-      r.date,
-      r.status,
-      markerMap.get(r.marked_by) ?? r.marked_by ?? '',
-    ]);
-
     if (action === 'export_all') {
-      await clearSheetRows(accessToken, spreadsheetId, targetSheetTitle);
-      await writeRows(accessToken, spreadsheetId, targetSheetTitle, [HEADER_ROW, ...values]);
-    } else {
-      await appendRows(accessToken, spreadsheetId, targetSheetTitle, values);
+      const values = dbRows.map((r: any) => [
+        r.id, r.students?.name ?? '', r.students?.matric_no ?? '', r.students?.gender ?? '',
+        r.departments?.name ?? '', r.courses?.code ?? '', r.courses?.name ?? '',
+        r.date, r.status, new Date().toISOString(),
+      ]);
+      await overwriteTab(token, sid, ATTENDANCE_TAB, ATTENDANCE_HEADER, values);
+      const progress = buildProgress(values as any);
+      await overwriteTab(token, sid, PROGRESS_TAB, PROGRESS_HEADER, progress);
+      const ids = dbRows.map((r: any) => r.id);
+      if (ids.length) await admin.from('attendance').update({ synced_to_sheets: true, synced_at: new Date().toISOString() }).in('id', ids);
+      return new Response(JSON.stringify({ ok: true, exported: values.length, spreadsheetId: sid }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
-    // Mark synced
-    const ids = rows.map((r: any) => r.id);
-    await admin
-      .from('attendance')
-      .update({ synced_to_sheets: true, synced_at: new Date().toISOString() })
-      .in('id', ids);
+    if (!dbRows.length) {
+      return new Response(JSON.stringify({ ok: true, synced: 0, message: 'nothing to sync' }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    }
 
-    const spreadsheetUrl = `https://docs.google.com/spreadsheets/d/${spreadsheetId}`;
-    return new Response(JSON.stringify({ ok: true, synced: ids.length, spreadsheetId, spreadsheetUrl, sheet: targetSheetTitle }), {
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-    });
+    // dedup against existing attendance_ids in the sheet
+    const existing = await readAttendanceIds(token, sid);
+    const fresh = dbRows.filter((r: any) => !existing.has(r.id));
+    const now = new Date().toISOString();
+    const rowsToAppend = fresh.map((r: any) => [
+      r.id, r.students?.name ?? '', r.students?.matric_no ?? '', r.students?.gender ?? '',
+      r.departments?.name ?? '', r.courses?.code ?? '', r.courses?.name ?? '',
+      r.date, r.status, now,
+    ]);
+    if (rowsToAppend.length) {
+      await appendRows(token, sid, ATTENDANCE_TAB, rowsToAppend);
+      console.log(`sheets-sync: appended ${rowsToAppend.length} new rows`);
+    }
+
+    // rebuild progress from full attendance tab (source of truth)
+    const allAttendance = await readAttendanceRows(token, sid);
+    const progress = buildProgress(allAttendance);
+    await overwriteTab(token, sid, PROGRESS_TAB, PROGRESS_HEADER, progress);
+
+    // mark synced
+    const ids = dbRows.map((r: any) => r.id);
+    await admin.from('attendance').update({ synced_to_sheets: true, synced_at: now }).in('id', ids);
+
+    return new Response(JSON.stringify({
+      ok: true, synced: ids.length, appended: rowsToAppend.length, progressRows: progress.length,
+      spreadsheetId: sid, spreadsheetUrl: `https://docs.google.com/spreadsheets/d/${sid}`,
+    }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
   } catch (e: any) {
     console.error('sheets-sync error:', e);
-    return new Response(JSON.stringify({ ok: false, error: e?.message || String(e) }), {
-      status: 500,
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-    });
+    return new Response(JSON.stringify({ ok: false, error: e?.message || String(e) }), { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
   }
 });
