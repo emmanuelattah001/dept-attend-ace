@@ -8,6 +8,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { toast } from 'sonner';
 import { Plus, Building2, Users, CalendarCheck, Download, UserCog } from 'lucide-react';
 import DashboardLayout from '@/components/DashboardLayout';
+import { ProgressSummary } from '@/components/ProgressSummary';
 import LoadingScreen from '@/components/LoadingScreen';
 
 interface Department {
@@ -239,6 +240,9 @@ const SuperAdminDashboard = () => {
           <h2 className="text-2xl font-heading font-bold">Super Admin Dashboard</h2>
           <p className="text-muted-foreground text-sm mt-1">Manage departments, users, and view all attendance</p>
         </div>
+
+        <ProgressSummary />
+
 
         <div className="flex gap-2 border-b">
           {tabs.map(tab => (
