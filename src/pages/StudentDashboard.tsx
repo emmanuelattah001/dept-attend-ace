@@ -139,8 +139,8 @@ const StudentDashboard = () => {
                   {records.map(r => (
                     <TableRow key={r.id}>
                       <TableCell>{r.date}</TableCell>
-                      <TableCell>{r.departments?.name ?? '-'}</TableCell>
-                      <TableCell>{r.courses ? `${r.courses.code ? r.courses.code + ' - ' : ''}${r.courses.name}` : '-'}</TableCell>
+                      <TableCell>{r.department ?? '-'}</TableCell>
+                      <TableCell>{r.course ?? '-'}</TableCell>
                       <TableCell>
                         <span className={`text-xs px-2 py-0.5 rounded-full font-medium capitalize ${statusStyles[r.status] || 'bg-muted'}`}>
                           {r.status}
