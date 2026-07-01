@@ -13,15 +13,15 @@ interface AttendanceRecord {
   id: string;
   date: string;
   status: string;
-  departments: { name: string } | null;
-  courses?: { name: string; code: string | null } | null;
+  department: string | null;
+  course: string | null;
 }
 
 const StudentDashboard = () => {
   const { user } = useAuth();
   const navigate = useNavigate();
   const [records, setRecords] = useState<AttendanceRecord[]>([]);
-  const [stats, setStats] = useState({ present: 0, absent: 0 });
+  const [stats, setStats] = useState({ present: 0, absent: 0, total: 0, percentage: 0 });
   const [initialLoading, setInitialLoading] = useState(true);
 
   useEffect(() => {
@@ -33,45 +33,39 @@ const StudentDashboard = () => {
         .eq('auth_user_id', user.id)
         .maybeSingle();
 
-      if (studentError) {
-        console.error('Student lookup failed:', studentError);
-      }
+      if (studentError) console.error('Student lookup failed:', studentError);
+      const matric = studentRow?.matric_no;
 
-      const [dbRes, sheetRes] = await Promise.all([
-        studentRow?.id
-          ? supabase
-              .from('attendance')
-              .select('id, date, status, departments(name), courses(name, code)')
-              .eq('student_ref', studentRow.id)
-              .order('date', { ascending: false })
-          : Promise.resolve({ data: [], error: null } as any),
-        studentRow?.matric_no
+      const [sheetRes, progressRes] = await Promise.all([
+        matric
           ? supabase.functions.invoke('sheets-sync', {
-              body: { action: 'lookup_by_matric', matric_no: studentRow.matric_no },
+              body: { action: 'lookup_by_matric', matric_no: matric },
+            })
+          : Promise.resolve({ data: { rows: [] }, error: null } as any),
+        matric
+          ? supabase.functions.invoke('get-student-progress', {
+              body: { matric_no: matric },
             })
           : Promise.resolve({ data: { rows: [] }, error: null } as any),
       ]);
 
-      const seen = new Set<string>();
-      const merged: AttendanceRecord[] = [];
-      const push = (id: string, date: string, status: string, deptName: string | null, course?: AttendanceRecord['courses']) => {
-        const key = `${date}|${(status || '').toLowerCase()}|${course?.code ?? course?.name ?? ''}`;
-        if (!date || seen.has(key)) return;
-        seen.add(key);
-        merged.push({ id, date, status, departments: deptName ? { name: deptName } : null, courses: course ?? null });
-      };
-      if (dbRes.error) {
-        console.error('Attendance lookup failed:', dbRes.error);
-      }
-      for (const r of (dbRes.data ?? []) as any[]) push(r.id, r.date, r.status, r.departments?.name ?? null, r.courses ?? null);
-      for (const r of (sheetRes.data?.rows ?? []) as any[]) push(`sheet-${r.date}-${r.status}`, r.date, r.status, null);
-      merged.sort((a, b) => b.date.localeCompare(a.date));
+      const rows: AttendanceRecord[] = ((sheetRes.data?.rows ?? []) as any[]).map((r, i) => ({
+        id: r.attendance_id ?? `sheet-${i}`,
+        date: r.date,
+        status: r.status,
+        department: r.department ?? null,
+        course: r.course_code ? `${r.course_code}${r.course_name ? ' - ' + r.course_name : ''}` : (r.course_name ?? null),
+      }));
+      rows.sort((a, b) => (b.date ?? '').localeCompare(a.date ?? ''));
+      setRecords(rows);
 
-      setRecords(merged);
-      setStats({
-        present: merged.filter(r => r.status?.toLowerCase() === 'present').length,
-        absent: merged.filter(r => r.status?.toLowerCase() === 'absent').length,
-      });
+      // Percentages come from Student Progress sheet (source of truth)
+      const progRows: any[] = progressRes.data?.rows ?? [];
+      const present = progRows.reduce((s, r) => s + (r.total_present ?? 0), 0);
+      const absent = progRows.reduce((s, r) => s + (r.total_absent ?? 0), 0);
+      const total = progRows.reduce((s, r) => s + (r.total_classes ?? 0), 0);
+      const percentage = total ? Math.round((present / total) * 1000) / 10 : 0;
+      setStats({ present, absent, total, percentage });
       setInitialLoading(false);
     };
     fetchAttendance();
