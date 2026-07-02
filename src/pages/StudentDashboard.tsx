@@ -35,8 +35,17 @@ const StudentDashboard = () => {
 
       if (studentError) console.error('Student lookup failed:', studentError);
       const matric = studentRow?.matric_no;
+      const studentId = studentRow?.id;
 
-      const [sheetRes, progressRes] = await Promise.all([
+      // Query DB directly (source of truth for recent records) + Sheet (archive) in parallel.
+      const [dbRes, sheetRes, progressRes] = await Promise.all([
+        studentId
+          ? supabase
+              .from('attendance')
+              .select('id, date, status, departments(name), courses(code, name)')
+              .eq('student_ref', studentId)
+              .order('date', { ascending: false })
+          : Promise.resolve({ data: [], error: null } as any),
         matric
           ? supabase.functions.invoke('sheets-sync', {
               body: { action: 'lookup_by_matric', matric_no: matric },
@@ -49,27 +58,53 @@ const StudentDashboard = () => {
           : Promise.resolve({ data: { rows: [] }, error: null } as any),
       ]);
 
-      const rows: AttendanceRecord[] = ((sheetRes.data?.rows ?? []) as any[]).map((r, i) => ({
+      if (dbRes.error) console.error('DB attendance fetch failed:', dbRes.error);
+
+      const dbRows: AttendanceRecord[] = ((dbRes.data ?? []) as any[]).map((r) => ({
+        id: r.id,
+        date: r.date,
+        status: r.status,
+        department: r.departments?.name ?? null,
+        course: r.courses ? `${r.courses.code}${r.courses.name ? ' - ' + r.courses.name : ''}` : null,
+      }));
+
+      const sheetRows: AttendanceRecord[] = ((sheetRes.data?.rows ?? []) as any[]).map((r, i) => ({
         id: r.attendance_id ?? `sheet-${i}`,
         date: r.date,
         status: r.status,
         department: r.department ?? null,
         course: r.course_code ? `${r.course_code}${r.course_name ? ' - ' + r.course_name : ''}` : (r.course_name ?? null),
       }));
-      rows.sort((a, b) => (b.date ?? '').localeCompare(a.date ?? ''));
-      setRecords(rows);
 
-      // Percentages come from Student Progress sheet (source of truth)
+      // Merge, dedupe by date|course|status
+      const seen = new Set<string>();
+      const merged: AttendanceRecord[] = [];
+      for (const r of [...dbRows, ...sheetRows]) {
+        const k = `${r.date}|${r.course ?? ''}|${r.status}`;
+        if (seen.has(k)) continue;
+        seen.add(k);
+        merged.push(r);
+      }
+      merged.sort((a, b) => (b.date ?? '').localeCompare(a.date ?? ''));
+      setRecords(merged);
+
+      // Stats: prefer Sheet Progress (archive), else compute from merged records.
       const progRows: any[] = progressRes.data?.rows ?? [];
-      const present = progRows.reduce((s, r) => s + (r.total_present ?? 0), 0);
-      const absent = progRows.reduce((s, r) => s + (r.total_absent ?? 0), 0);
-      const total = progRows.reduce((s, r) => s + (r.total_classes ?? 0), 0);
+      let present = progRows.reduce((s, r) => s + (r.total_present ?? 0), 0);
+      let absent = progRows.reduce((s, r) => s + (r.total_absent ?? 0), 0);
+      let total = progRows.reduce((s, r) => s + (r.total_classes ?? 0), 0);
+      if (total === 0 && merged.length > 0) {
+        present = merged.filter(r => r.status === 'present').length;
+        absent = merged.filter(r => r.status === 'absent').length;
+        total = present + absent;
+      }
       const percentage = total ? Math.round((present / total) * 1000) / 10 : 0;
       setStats({ present, absent, total, percentage });
       setInitialLoading(false);
     };
     fetchAttendance();
   }, [user]);
+
 
 
   const percentage = stats.percentage;
