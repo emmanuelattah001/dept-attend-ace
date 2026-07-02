@@ -33,30 +33,54 @@ const CheckAttendance = () => {
   setLoading(true);
   setSearched(true);
 
-  // Google Sheet is the permanent archive; Student Progress sheet is the source of truth for percentages.
-  const [sheetRes, progressRes] = await Promise.all([
+  // DB (recent) + Sheet (archive) + Progress (percentages)
+  const [dbRes, sheetRes, progressRes] = await Promise.all([
+    supabase.rpc('get_attendance_by_matric', { _matric_no: trimmed }),
     supabase.functions.invoke('sheets-sync', { body: { action: 'lookup_by_matric', matric_no: trimmed } }),
     supabase.functions.invoke('get-student-progress', { body: { matric_no: trimmed } }),
   ]);
 
+  if (dbRes.error) console.log('DB ERROR:', dbRes.error);
   if (sheetRes.error) console.log('SHEET ERROR:', sheetRes.error);
   if (progressRes.error) console.log('PROGRESS ERROR:', progressRes.error);
 
-  const rows: AttendanceRow[] = ((sheetRes.data?.rows ?? []) as any[])
-    .map(r => ({ attendance_date: r.date, status: r.status, department_name: r.department ?? '' }))
-    .sort((a, b) => (b.attendance_date ?? '').localeCompare(a.attendance_date ?? ''));
-  setRecords(rows);
+  const dbRows: AttendanceRow[] = ((dbRes.data ?? []) as any[]).map(r => ({
+    attendance_date: r.attendance_date,
+    status: r.status,
+    department_name: r.department_name ?? '',
+  }));
+  const sheetRows: AttendanceRow[] = ((sheetRes.data?.rows ?? []) as any[]).map((r: any) => ({
+    attendance_date: r.date,
+    status: r.status,
+    department_name: r.department ?? '',
+  }));
+  const seen = new Set<string>();
+  const merged: AttendanceRow[] = [];
+  for (const r of [...dbRows, ...sheetRows]) {
+    const k = `${r.attendance_date}|${r.status}|${r.department_name}`;
+    if (seen.has(k)) continue;
+    seen.add(k);
+    merged.push(r);
+  }
+  merged.sort((a, b) => (b.attendance_date ?? '').localeCompare(a.attendance_date ?? ''));
+  setRecords(merged);
 
   const progRows: any[] = progressRes.data?.rows ?? [];
-  const present = progRows.reduce((s, r) => s + (r.total_present ?? 0), 0);
-  const absent = progRows.reduce((s, r) => s + (r.total_absent ?? 0), 0);
-  const total = progRows.reduce((s, r) => s + (r.total_classes ?? 0), 0);
+  let present = progRows.reduce((s, r) => s + (r.total_present ?? 0), 0);
+  let absent = progRows.reduce((s, r) => s + (r.total_absent ?? 0), 0);
+  let total = progRows.reduce((s, r) => s + (r.total_classes ?? 0), 0);
+  if (total === 0 && merged.length > 0) {
+    present = merged.filter(r => r.status === 'present').length;
+    absent = merged.filter(r => r.status === 'absent').length;
+    total = present + absent;
+  }
   const percentage = total ? Math.round((present / total) * 1000) / 10 : 0;
   setStats({ present, absent, total, percentage });
 
-  if (!rows.length && !progRows.length) toast.message('No attendance records found for this matric number');
+  if (!merged.length) toast.message('No attendance records found for this matric number');
   setLoading(false);
 };
+
 
 
   const { present, absent, percentage } = stats;
