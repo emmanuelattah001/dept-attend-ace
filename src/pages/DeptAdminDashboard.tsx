@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import DashboardLayout from '@/components/DashboardLayout';
 import { SheetsActions } from '@/components/SheetsActions';
+import { SheetsSettingsDialog } from '@/components/SheetsSettingsDialog';
 import { ProgressSummary } from '@/components/ProgressSummary';
 import LoadingScreen from '@/components/LoadingScreen';
 import { QRCodeCanvas } from 'qrcode.react';
@@ -1233,6 +1234,7 @@ const DeptAdminDashboard = () => {
               onExport={() => pushToGoogleSheets('export_all')}
               onSync={() => pushToGoogleSheets('sync_unsynced')}
             />
+            <SheetsSettingsDialog />
           </div>
         </div>
 
