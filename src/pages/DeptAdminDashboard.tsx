@@ -20,6 +20,7 @@ import { SheetsSettingsDialog } from '@/components/SheetsSettingsDialog';
 import { ProgressSummary } from '@/components/ProgressSummary';
 import LoadingScreen from '@/components/LoadingScreen';
 import { QRCodeCanvas } from 'qrcode.react';
+import { LocationPicker } from '@/components/LocationPicker';
 import * as XLSX from "xlsx";
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
