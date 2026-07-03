@@ -87,6 +87,10 @@ const DeptAdminDashboard = () => {
   const [qrDate, setQrDate] = useState<string>(new Date().toISOString().split('T')[0]);
   const [qrDurationMin, setQrDurationMin] = useState<number>(15);
   const [qrCreating, setQrCreating] = useState(false);
+  const [qrLat, setQrLat] = useState<number | null>(null);
+  const [qrLng, setQrLng] = useState<number | null>(null);
+  const [qrRadius, setQrRadius] = useState<number>(100);
+  const [qrEnding, setQrEnding] = useState(false);
   const [provisioningAuth, setProvisioningAuth] = useState(false);
   const [now, setNow] = useState(Date.now());
   useEffect(() => {
