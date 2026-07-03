@@ -20,6 +20,7 @@ import { SheetsSettingsDialog } from '@/components/SheetsSettingsDialog';
 import { ProgressSummary } from '@/components/ProgressSummary';
 import LoadingScreen from '@/components/LoadingScreen';
 import { QRCodeCanvas } from 'qrcode.react';
+import { LocationPicker } from '@/components/LocationPicker';
 import * as XLSX from "xlsx";
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -87,6 +88,10 @@ const DeptAdminDashboard = () => {
   const [qrDate, setQrDate] = useState<string>(new Date().toISOString().split('T')[0]);
   const [qrDurationMin, setQrDurationMin] = useState<number>(15);
   const [qrCreating, setQrCreating] = useState(false);
+  const [qrLat, setQrLat] = useState<number | null>(null);
+  const [qrLng, setQrLng] = useState<number | null>(null);
+  const [qrRadius, setQrRadius] = useState<number>(100);
+  const [qrEnding, setQrEnding] = useState(false);
   const [provisioningAuth, setProvisioningAuth] = useState(false);
   const [now, setNow] = useState(Date.now());
   useEffect(() => {
@@ -1056,6 +1061,7 @@ const DeptAdminDashboard = () => {
   const createQrSession = async () => {
     if (!qrCourseId) { toast.error('Pick a course first'); return; }
     if (!profile?.department_id || !user) { toast.error('Missing profile'); return; }
+    if (qrLat == null || qrLng == null) { toast.error('Pick the class location on the map'); return; }
     setQrCreating(true);
     try {
       const token = Array.from(crypto.getRandomValues(new Uint8Array(18)))
@@ -1068,6 +1074,9 @@ const DeptAdminDashboard = () => {
         token,
         expires_at,
         created_by: user.id,
+        latitude: qrLat,
+        longitude: qrLng,
+        radius_m: qrRadius,
       }).select('token, expires_at, course_id, date').single();
       if (error) throw error;
       setQrSession(data);
@@ -1079,11 +1088,37 @@ const DeptAdminDashboard = () => {
     }
   };
 
+  const useMyLocation = () => {
+    if (!navigator.geolocation) { toast.error('Geolocation not supported'); return; }
+    toast.message('Getting your location...');
+    navigator.geolocation.getCurrentPosition(
+      (pos) => { setQrLat(pos.coords.latitude); setQrLng(pos.coords.longitude); toast.success('Location captured'); },
+      (err) => toast.error('Location failed: ' + err.message),
+      { enableHighAccuracy: true, timeout: 10000 }
+    );
+  };
+
   const endQrSession = async () => {
     if (!qrSession) return;
     await (supabase as any).from('attendance_sessions').update({ expires_at: new Date().toISOString() }).eq('token', qrSession.token);
     setQrSession(null);
     toast.message('Session ended');
+  };
+
+  const endAndMarkAbsent = async () => {
+    if (!qrSession) return;
+    setQrEnding(true);
+    try {
+      const { data, error } = await supabase.functions.invoke('end-session', { body: { token: qrSession.token } });
+      if (error || (data as any)?.error) throw new Error((data as any)?.error || error?.message);
+      toast.success(`Session ended. ${(data as any)?.marked_absent ?? 0} student(s) marked absent.`);
+      setQrSession(null);
+      fetchHistory();
+    } catch (e: any) {
+      toast.error(e.message ?? 'Failed to end session');
+    } finally {
+      setQrEnding(false);
+    }
   };
 
   const provisionStudentLogins = async () => {
@@ -1239,7 +1274,8 @@ const DeptAdminDashboard = () => {
         </div>
 
         <Dialog open={showQrDialog} onOpenChange={(o) => { setShowQrDialog(o); if (!o) { setQrSession(null); } }}>
-          <DialogContent className="max-w-md">
+          <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+
             <DialogHeader><DialogTitle>Live QR Attendance Session</DialogTitle></DialogHeader>
             {!qrSession ? (
               <div className="space-y-3 pt-2">
@@ -1271,12 +1307,28 @@ const DeptAdminDashboard = () => {
                     </SelectContent>
                   </Select>
                 </div>
-                <Button onClick={createQrSession} disabled={qrCreating || !qrCourseId} className="w-full">
+
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label className="text-sm font-medium">Class location (tap map to set)</label>
+                    <Button type="button" size="sm" variant="outline" onClick={useMyLocation}>Use my location</Button>
+                  </div>
+                  <LocationPicker lat={qrLat} lng={qrLng} radius={qrRadius} onChange={(la, ln) => { setQrLat(la); setQrLng(ln); }} />
+                  <div className="flex items-center gap-2">
+                    <label className="text-sm font-medium whitespace-nowrap">Radius (m)</label>
+                    <Input type="number" min={10} max={5000} value={qrRadius} onChange={e => setQrRadius(Math.max(10, Number(e.target.value) || 100))} />
+                  </div>
+                  {qrLat != null && qrLng != null && (
+                    <p className="text-xs text-muted-foreground">Pin: {qrLat.toFixed(5)}, {qrLng.toFixed(5)} · radius {qrRadius}m</p>
+                  )}
+                </div>
+
+                <Button onClick={createQrSession} disabled={qrCreating || !qrCourseId || qrLat == null} className="w-full">
                   {qrCreating ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <QrCode className="w-4 h-4 mr-2" />}
                   Start session
                 </Button>
                 <p className="text-xs text-muted-foreground">
-                  Students scan the QR with the AttendTrack app (Scan QR button) to mark themselves present.
+                  Students must be within the radius of the pinned location to mark attendance.
                 </p>
               </div>
             ) : (() => {
@@ -1293,11 +1345,15 @@ const DeptAdminDashboard = () => {
                   </div>
                   <p className="text-2xl font-mono font-bold">{expired ? 'EXPIRED' : `${mm}:${ss}`}</p>
                   <p className="text-xs text-muted-foreground break-all">{scanUrl}</p>
-                  <div className="flex gap-2 justify-center">
+                  <div className="flex flex-wrap gap-2 justify-center">
                     <Button size="sm" variant="outline" onClick={() => { navigator.clipboard.writeText(scanUrl); toast.success('Link copied'); }}>
                       <Copy className="w-4 h-4 mr-1" /> Copy link
                     </Button>
-                    <Button size="sm" variant="destructive" onClick={endQrSession}>End session</Button>
+                    <Button size="sm" variant="outline" onClick={endQrSession}>End session</Button>
+                    <Button size="sm" variant="destructive" onClick={endAndMarkAbsent} disabled={qrEnding}>
+                      {qrEnding ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <XCircle className="w-4 h-4 mr-1" />}
+                      End & mark absent
+                    </Button>
                   </div>
                 </div>
               );

@@ -119,6 +119,9 @@ export type Database = {
           department_id: string
           expires_at: string
           id: string
+          latitude: number | null
+          longitude: number | null
+          radius_m: number | null
           token: string
         }
         Insert: {
@@ -129,6 +132,9 @@ export type Database = {
           department_id: string
           expires_at: string
           id?: string
+          latitude?: number | null
+          longitude?: number | null
+          radius_m?: number | null
           token: string
         }
         Update: {
@@ -139,6 +145,9 @@ export type Database = {
           department_id?: string
           expires_at?: string
           id?: string
+          latitude?: number | null
+          longitude?: number | null
+          radius_m?: number | null
           token?: string
         }
         Relationships: [
