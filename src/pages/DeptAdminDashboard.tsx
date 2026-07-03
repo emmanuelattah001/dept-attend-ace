@@ -1274,7 +1274,8 @@ const DeptAdminDashboard = () => {
         </div>
 
         <Dialog open={showQrDialog} onOpenChange={(o) => { setShowQrDialog(o); if (!o) { setQrSession(null); } }}>
-          <DialogContent className="max-w-md">
+          <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+
             <DialogHeader><DialogTitle>Live QR Attendance Session</DialogTitle></DialogHeader>
             {!qrSession ? (
               <div className="space-y-3 pt-2">
