@@ -1345,11 +1345,15 @@ const DeptAdminDashboard = () => {
                   </div>
                   <p className="text-2xl font-mono font-bold">{expired ? 'EXPIRED' : `${mm}:${ss}`}</p>
                   <p className="text-xs text-muted-foreground break-all">{scanUrl}</p>
-                  <div className="flex gap-2 justify-center">
+                  <div className="flex flex-wrap gap-2 justify-center">
                     <Button size="sm" variant="outline" onClick={() => { navigator.clipboard.writeText(scanUrl); toast.success('Link copied'); }}>
                       <Copy className="w-4 h-4 mr-1" /> Copy link
                     </Button>
-                    <Button size="sm" variant="destructive" onClick={endQrSession}>End session</Button>
+                    <Button size="sm" variant="outline" onClick={endQrSession}>End session</Button>
+                    <Button size="sm" variant="destructive" onClick={endAndMarkAbsent} disabled={qrEnding}>
+                      {qrEnding ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <XCircle className="w-4 h-4 mr-1" />}
+                      End & mark absent
+                    </Button>
                   </div>
                 </div>
               );
