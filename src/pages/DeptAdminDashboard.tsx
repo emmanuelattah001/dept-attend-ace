@@ -1112,7 +1112,7 @@ const DeptAdminDashboard = () => {
       if (error || (data as any)?.error) throw new Error((data as any)?.error || error?.message);
       toast.success(`Session ended. ${(data as any)?.marked_absent ?? 0} student(s) marked absent.`);
       setQrSession(null);
-      loadAll?.();
+      fetchHistory();
     } catch (e: any) {
       toast.error(e.message ?? 'Failed to end session');
     } finally {
