@@ -1305,12 +1305,28 @@ const DeptAdminDashboard = () => {
                     </SelectContent>
                   </Select>
                 </div>
-                <Button onClick={createQrSession} disabled={qrCreating || !qrCourseId} className="w-full">
+
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label className="text-sm font-medium">Class location (tap map to set)</label>
+                    <Button type="button" size="sm" variant="outline" onClick={useMyLocation}>Use my location</Button>
+                  </div>
+                  <LocationPicker lat={qrLat} lng={qrLng} radius={qrRadius} onChange={(la, ln) => { setQrLat(la); setQrLng(ln); }} />
+                  <div className="flex items-center gap-2">
+                    <label className="text-sm font-medium whitespace-nowrap">Radius (m)</label>
+                    <Input type="number" min={10} max={5000} value={qrRadius} onChange={e => setQrRadius(Math.max(10, Number(e.target.value) || 100))} />
+                  </div>
+                  {qrLat != null && qrLng != null && (
+                    <p className="text-xs text-muted-foreground">Pin: {qrLat.toFixed(5)}, {qrLng.toFixed(5)} · radius {qrRadius}m</p>
+                  )}
+                </div>
+
+                <Button onClick={createQrSession} disabled={qrCreating || !qrCourseId || qrLat == null} className="w-full">
                   {qrCreating ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <QrCode className="w-4 h-4 mr-2" />}
                   Start session
                 </Button>
                 <p className="text-xs text-muted-foreground">
-                  Students scan the QR with the AttendTrack app (Scan QR button) to mark themselves present.
+                  Students must be within the radius of the pinned location to mark attendance.
                 </p>
               </div>
             ) : (() => {
