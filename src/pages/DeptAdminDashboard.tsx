@@ -1060,6 +1060,7 @@ const DeptAdminDashboard = () => {
   const createQrSession = async () => {
     if (!qrCourseId) { toast.error('Pick a course first'); return; }
     if (!profile?.department_id || !user) { toast.error('Missing profile'); return; }
+    if (qrLat == null || qrLng == null) { toast.error('Pick the class location on the map'); return; }
     setQrCreating(true);
     try {
       const token = Array.from(crypto.getRandomValues(new Uint8Array(18)))
@@ -1072,6 +1073,9 @@ const DeptAdminDashboard = () => {
         token,
         expires_at,
         created_by: user.id,
+        latitude: qrLat,
+        longitude: qrLng,
+        radius_m: qrRadius,
       }).select('token, expires_at, course_id, date').single();
       if (error) throw error;
       setQrSession(data);
@@ -1083,11 +1087,37 @@ const DeptAdminDashboard = () => {
     }
   };
 
+  const useMyLocation = () => {
+    if (!navigator.geolocation) { toast.error('Geolocation not supported'); return; }
+    toast.message('Getting your location...');
+    navigator.geolocation.getCurrentPosition(
+      (pos) => { setQrLat(pos.coords.latitude); setQrLng(pos.coords.longitude); toast.success('Location captured'); },
+      (err) => toast.error('Location failed: ' + err.message),
+      { enableHighAccuracy: true, timeout: 10000 }
+    );
+  };
+
   const endQrSession = async () => {
     if (!qrSession) return;
     await (supabase as any).from('attendance_sessions').update({ expires_at: new Date().toISOString() }).eq('token', qrSession.token);
     setQrSession(null);
     toast.message('Session ended');
+  };
+
+  const endAndMarkAbsent = async () => {
+    if (!qrSession) return;
+    setQrEnding(true);
+    try {
+      const { data, error } = await supabase.functions.invoke('end-session', { body: { token: qrSession.token } });
+      if (error || (data as any)?.error) throw new Error((data as any)?.error || error?.message);
+      toast.success(`Session ended. ${(data as any)?.marked_absent ?? 0} student(s) marked absent.`);
+      setQrSession(null);
+      loadAll?.();
+    } catch (e: any) {
+      toast.error(e.message ?? 'Failed to end session');
+    } finally {
+      setQrEnding(false);
+    }
   };
 
   const provisionStudentLogins = async () => {
