@@ -26,12 +26,24 @@ const ScanPage = () => {
     }
   }, [user, loading, navigate, params]);
 
+  const getLocation = () => new Promise<{ lat: number; lng: number; accuracy: number } | null>((resolve) => {
+    if (!navigator.geolocation) return resolve(null);
+    navigator.geolocation.getCurrentPosition(
+      (pos) => resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude, accuracy: pos.coords.accuracy }),
+      () => resolve(null),
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+    );
+  });
+
   const submitToken = async (token: string) => {
     if (submittedRef.current) return;
     submittedRef.current = true;
     setSubmitting(true);
     try {
-      const { data, error } = await supabase.functions.invoke('mark-via-qr', { body: { token } });
+      const loc = await getLocation();
+      const body: any = { token };
+      if (loc) { body.lat = loc.lat; body.lng = loc.lng; body.accuracy = loc.accuracy; }
+      const { data, error } = await supabase.functions.invoke('mark-via-qr', { body });
       if (error || (data as any)?.error) {
         const msg = (data as any)?.error || error?.message || 'Failed to mark attendance';
         setResult({ ok: false, message: msg });
