@@ -340,12 +340,14 @@ const DeptAdminDashboard = () => {
 
   const fetchAttendanceGrid = async () => {
     if (!profile?.department_id) return;
+    if (!selectedCourse) { setGrid({}); return; }
 
     try {
       const { data, error } = await supabase
         .from('attendance')
-        .select('student_ref, date, status')
-        .eq('department_id', profile.department_id);
+        .select('student_ref, date, status, course_id')
+        .eq('department_id', profile.department_id)
+        .eq('course_id', selectedCourse);
 
       if (error) throw error;
 
@@ -358,7 +360,7 @@ const DeptAdminDashboard = () => {
         newGrid[r.student_ref][r.date] = val;
       });
 
-      const unsynced = localAttendance.filter(item => !item.synced);
+      const unsynced = localAttendance.filter(item => !item.synced && item.courseId === selectedCourse);
       unsynced.forEach(item => {
         if (!newGrid[item.studentId]) newGrid[item.studentId] = {};
         newGrid[item.studentId][item.date] = item.status;
@@ -369,6 +371,7 @@ const DeptAdminDashboard = () => {
       console.error('Error fetching attendance grid:', error);
     }
   };
+
 
   const addCourse = async () => {
     if (!newCourse.name.trim() || !newCourse.code.trim()) {
