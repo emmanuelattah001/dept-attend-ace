@@ -1279,6 +1279,10 @@ const DeptAdminDashboard = () => {
               {provisioningAuth ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <KeyRound className="w-4 h-4 mr-1" />}
               Create Student Logins
             </Button>
+            <Button size="sm" variant="outline" onClick={resetStudentLogins} disabled={resettingLogins}>
+              {resettingLogins ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <KeyRound className="w-4 h-4 mr-1" />}
+              Reset Login Lock
+            </Button>
             <SheetsActions
               busy={sheetsBusy}
               size="sm"
