@@ -33,6 +33,21 @@ const AuthPage = () => {
       const pwd = password || matricNo.trim().toLowerCase();
       const { error } = await supabase.auth.signInWithPassword({ email: synthetic, password: pwd });
       if (error) throw error;
+
+      // Enforce one-time login: claim this account's first login.
+      const { data: claim, error: claimErr } = await supabase.rpc('claim_student_login');
+      if (claimErr) {
+        await supabase.auth.signOut();
+        throw new Error(claimErr.message);
+      }
+      if (claim && (claim as any).ok === false) {
+        await supabase.auth.signOut();
+        if ((claim as any).reason === 'already_used') {
+          throw new Error('This account has already been used to log in. Please contact your course rep / admin to reset it.');
+        }
+        throw new Error('Login not allowed.');
+      }
+
       toast.success('Logged in');
       navigate(nextPath);
     } catch (err: any) {

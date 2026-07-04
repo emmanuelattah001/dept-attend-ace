@@ -266,6 +266,7 @@ export type Database = {
           auth_user_id: string | null
           created_at: string | null
           department_id: string
+          first_login_at: string | null
           gender: string | null
           id: string
           matric_no: string | null
@@ -275,6 +276,7 @@ export type Database = {
           auth_user_id?: string | null
           created_at?: string | null
           department_id: string
+          first_login_at?: string | null
           gender?: string | null
           id?: string
           matric_no?: string | null
@@ -284,6 +286,7 @@ export type Database = {
           auth_user_id?: string | null
           created_at?: string | null
           department_id?: string
+          first_login_at?: string | null
           gender?: string | null
           id?: string
           matric_no?: string | null
@@ -322,6 +325,7 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      claim_student_login: { Args: never; Returns: Json }
       get_attendance_by_matric: {
         Args: { _matric_no: string }
         Returns: {
