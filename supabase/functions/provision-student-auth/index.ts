@@ -64,7 +64,17 @@ Deno.serve(async (req) => {
 
       let authUserId = s.auth_user_id as string | null;
 
+      if (action === 'reset_login') {
+        await admin.from('students').update({ first_login_at: null }).eq('id', s.id);
+        results.push({ id: s.id, name: s.name, matric_no: s.matric_no, status: 'login_reset' });
+        continue;
+      }
+
       if (action === 'reset_password' && authUserId) {
+        await admin.auth.admin.updateUserById(authUserId, { password });
+        results.push({ id: s.id, name: s.name, matric_no: s.matric_no, email, status: 'password_reset' });
+        continue;
+      }
         await admin.auth.admin.updateUserById(authUserId, { password });
         results.push({ id: s.id, name: s.name, matric_no: s.matric_no, email, status: 'password_reset' });
         continue;
