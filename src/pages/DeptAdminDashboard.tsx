@@ -1137,6 +1137,22 @@ const DeptAdminDashboard = () => {
     }
   };
 
+  const [resettingLogins, setResettingLogins] = useState(false);
+  const resetStudentLogins = async () => {
+    if (!confirm('Reset one-time login lock for ALL students in your department? They will be able to sign in again once.')) return;
+    setResettingLogins(true);
+    try {
+      const { data, error } = await supabase.functions.invoke('provision-student-auth', { body: { action: 'reset_login' } });
+      if (error || (data as any)?.error) throw new Error((data as any)?.error || error?.message);
+      const n = (data as any)?.results?.filter((r: any) => r.status === 'login_reset').length ?? 0;
+      toast.success(`Reset login lock for ${n} student(s).`);
+    } catch (e: any) {
+      toast.error(e.message ?? 'Failed to reset logins');
+    } finally {
+      setResettingLogins(false);
+    }
+  };
+
 
   if (initialLoading) {
     return <LoadingScreen message="Loading dashboard..." />;
