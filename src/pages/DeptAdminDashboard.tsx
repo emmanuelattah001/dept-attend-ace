@@ -1062,7 +1062,30 @@ const DeptAdminDashboard = () => {
     { id: 'mark' as const, label: 'Mark Attendance', icon: CalendarCheck },
     { id: 'students' as const, label: 'Students', icon: Users },
     { id: 'history' as const, label: 'History', icon: History },
+    { id: 'logins' as const, label: 'Login Log', icon: ShieldCheck },
   ];
+
+  const fetchLoginEvents = async () => {
+    setLoginEventsLoading(true);
+    try {
+      const { data, error } = await (supabase as any)
+        .from('student_login_events')
+        .select('id, created_at, event, matric_no, student_id, detail')
+        .order('created_at', { ascending: false })
+        .limit(500);
+      if (error) throw error;
+      setLoginEvents(data ?? []);
+    } catch (e: any) {
+      toast.error(e?.message || 'Failed to load login events');
+    } finally {
+      setLoginEventsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (activeTab === 'logins') fetchLoginEvents();
+  }, [activeTab]);
+
 
   // Live QR session helpers
   const createQrSession = async () => {
