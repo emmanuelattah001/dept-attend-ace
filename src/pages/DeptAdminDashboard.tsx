@@ -81,6 +81,10 @@ const DeptAdminDashboard = () => {
   const [loginEventsLoading, setLoginEventsLoading] = useState(false);
   const [loginEventFilter, setLoginEventFilter] = useState<'all' | 'success' | 'blocked_already_used' | 'reset'>('all');
   const [loginEventSearch, setLoginEventSearch] = useState('');
+  const [historySource, setHistorySource] = useState<'local' | 'sheet'>('sheet');
+  const [sheetHistory, setSheetHistory] = useState<AttendanceRecord[]>([]);
+  const [sheetHistoryLoading, setSheetHistoryLoading] = useState(false);
+  const [sheetUrl, setSheetUrl] = useState<string | null>(null);
   const [studentEdits, setStudentEdits] = useState<Record<string, Partial<Student>>>({});
   const [savingStudents, setSavingStudents] = useState(false);
   const [syncingAttendance, setSyncingAttendance] = useState(false);
