@@ -1769,14 +1769,30 @@ const DeptAdminDashboard = () => {
           <Card>
             <CardHeader>
               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-                <CardTitle className="text-lg">Attendance History</CardTitle>
-                <div className="flex flex-wrap gap-2">
-                  {/* <SheetsActions
-                    busy={sheetsBusy}
-                    size="sm"
-                    onExport={() => pushToGoogleSheets('export_all')}
-                    onSync={() => pushToGoogleSheets('sync_unsynced')}
-                  /> */}
+                <div>
+                  <CardTitle className="text-lg">Attendance History</CardTitle>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    {historySource === 'sheet'
+                      ? <>Source: <span className="font-medium">Google Sheet</span>{sheetUrl && <> · <a href={sheetUrl} target="_blank" rel="noreferrer" className="underline">Open sheet</a></>}</>
+                      : <>Source: <span className="font-medium">Local database</span></>}
+                  </p>
+                </div>
+                <div className="flex flex-wrap gap-2 items-center">
+                  <Select value={historySource} onValueChange={(v: any) => setHistorySource(v)}>
+                    <SelectTrigger className="w-[170px]">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="sheet">Google Sheet</SelectItem>
+                      <SelectItem value="local">Local database</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  {historySource === 'sheet' && (
+                    <Button size="sm" variant="outline" onClick={fetchSheetHistory} disabled={sheetHistoryLoading}>
+                      {sheetHistoryLoading ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <RefreshCw className="w-4 h-4 mr-1" />}
+                      Refresh
+                    </Button>
+                  )}
                   <Button
                     variant="destructive"
                     size="sm"
@@ -1788,6 +1804,7 @@ const DeptAdminDashboard = () => {
                   </Button>
                 </div>
               </div>
+
               <div className="flex flex-col sm:flex-row gap-2 mt-3">
                 <div className="relative flex-1">
                   <Search className="absolute left-2.5 top-2.5 w-4 h-4 text-muted-foreground" />
