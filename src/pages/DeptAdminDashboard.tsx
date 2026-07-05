@@ -1861,17 +1861,28 @@ const DeptAdminDashboard = () => {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {filteredHistory
-                      .filter(r => {
+                    {(() => {
+                      const source = historySource === 'sheet' ? sheetHistory : filteredHistory;
+                      const filtered = source.filter(r => {
                         if (!searchQuery.trim()) return true;
                         const q = searchQuery.toLowerCase();
                         return (
                           (r.students?.name?.toLowerCase().includes(q)) ||
                           (r.students?.matric_no?.toLowerCase().includes(q))
                         );
-                      })
-                      .slice(0, 100)
-                      .map((r, idx) => (
+                      });
+                      if (filtered.length === 0) {
+                        return (
+                          <TableRow>
+                            <TableCell colSpan={7} className="text-center text-muted-foreground py-8">
+                              {historySource === 'sheet'
+                                ? (sheetHistoryLoading ? 'Loading from Google Sheet...' : 'No records found in the Google Sheet for your department.')
+                                : 'No attendance records yet. Start marking attendance!'}
+                            </TableCell>
+                          </TableRow>
+                        );
+                      }
+                      return filtered.slice(0, 100).map((r, idx) => (
                         <TableRow key={r.id}>
                           <TableCell className="text-center font-medium">{idx + 1}</TableCell>
                           <TableCell className="max-w-[200px] truncate" title={r.students?.name ?? 'Unknown'}>
@@ -1891,14 +1902,8 @@ const DeptAdminDashboard = () => {
                             </span>
                           </TableCell>
                         </TableRow>
-                      ))}
-                    {filteredHistory.length === 0 && (
-                      <TableRow>
-                        <TableCell colSpan={7} className="text-center text-muted-foreground py-8">
-                          No attendance records yet. Start marking attendance!
-                        </TableCell>
-                      </TableRow>
-                    )}
+                      ));
+                    })()}
                   </TableBody>
                 </Table>
               </div>
