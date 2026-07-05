@@ -181,7 +181,7 @@ Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
   try {
     const body = await req.json().catch(() => ({}));
-    const action: 'append' | 'sync_unsynced' | 'export_all' | 'lookup_by_matric' = body.action || 'sync_unsynced';
+    const action: 'append' | 'sync_unsynced' | 'export_all' | 'lookup_by_matric' | 'read_all' = body.action || 'sync_unsynced';
 
     const saJson = Deno.env.get('GOOGLE_SERVICE_ACCOUNT_JSON');
     if (!saJson) throw new Error('GOOGLE_SERVICE_ACCOUNT_JSON not configured');
@@ -214,6 +214,30 @@ Deno.serve(async (req) => {
     if (cerr || !claims?.claims) return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
 
     await ensureTabs(token, sid);
+
+    if (action === 'read_all') {
+      // Auth already verified above. Scope to caller's department unless super_admin.
+      const userId = (claims.claims as any).sub as string;
+      const { data: roles } = await admin.from('user_roles').select('role').eq('user_id', userId);
+      const isSuper = roles?.some((r: any) => r.role === 'super_admin');
+      let deptName: string | null = null;
+      if (!isSuper) {
+        const { data: prof } = await admin.from('profiles').select('department_id').eq('user_id', userId).maybeSingle();
+        if (prof?.department_id) {
+          const { data: dept } = await admin.from('departments').select('name').eq('id', prof.department_id).maybeSingle();
+          deptName = dept?.name ?? null;
+        }
+      }
+      const all = await readAttendanceRows(token, sid);
+      const rows = all
+        .filter(r => isSuper || (deptName && (r[4] ?? '') === deptName))
+        .map(r => ({
+          attendance_id: r[0], student_name: r[1], matric_no: r[2], gender: r[3], department: r[4],
+          course_code: r[5], course_name: r[6], date: r[7], status: r[8], synced_at: r[9],
+        }));
+      return new Response(JSON.stringify({ ok: true, rows, spreadsheetId: sid, spreadsheetUrl: `https://docs.google.com/spreadsheets/d/${sid}` }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    }
+
 
     const dbRows = await fetchAttendance(admin, action, body.ids);
     console.log(`sheets-sync[${action}]: fetched ${dbRows.length} rows`);

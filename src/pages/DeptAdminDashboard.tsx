@@ -81,6 +81,10 @@ const DeptAdminDashboard = () => {
   const [loginEventsLoading, setLoginEventsLoading] = useState(false);
   const [loginEventFilter, setLoginEventFilter] = useState<'all' | 'success' | 'blocked_already_used' | 'reset'>('all');
   const [loginEventSearch, setLoginEventSearch] = useState('');
+  const [historySource, setHistorySource] = useState<'local' | 'sheet'>('sheet');
+  const [sheetHistory, setSheetHistory] = useState<AttendanceRecord[]>([]);
+  const [sheetHistoryLoading, setSheetHistoryLoading] = useState(false);
+  const [sheetUrl, setSheetUrl] = useState<string | null>(null);
   const [studentEdits, setStudentEdits] = useState<Record<string, Partial<Student>>>({});
   const [savingStudents, setSavingStudents] = useState(false);
   const [syncingAttendance, setSyncingAttendance] = useState(false);
@@ -1086,6 +1090,43 @@ const DeptAdminDashboard = () => {
     if (activeTab === 'logins') fetchLoginEvents();
   }, [activeTab]);
 
+  const fetchSheetHistory = async () => {
+    setSheetHistoryLoading(true);
+    try {
+      const { data, error } = await (supabase as any).functions.invoke('sheets-sync', {
+        body: { action: 'read_all' },
+      });
+      if (error) throw error;
+      if (!data?.ok) throw new Error(data?.error || 'Failed to read Google Sheet');
+      setSheetUrl(data.spreadsheetUrl ?? null);
+      const rows: AttendanceRecord[] = (data.rows ?? []).map((r: any, i: number) => ({
+        id: r.attendance_id || `sheet-${i}`,
+        student_ref: '',
+        course_id: '',
+        date: r.date,
+        status: (r.status || '').toLowerCase(),
+        students: { name: r.student_name, matric_no: r.matric_no, gender: r.gender },
+        courses: { name: r.course_name, code: r.course_code },
+      }) as AttendanceRecord);
+      // newest first by date
+      rows.sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+      setSheetHistory(rows);
+    } catch (e: any) {
+      console.error('sheet history error', e);
+      toast.error(e?.message || 'Failed to load Google Sheet history');
+    } finally {
+      setSheetHistoryLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (activeTab === 'history' && historySource === 'sheet' && sheetHistory.length === 0 && !sheetHistoryLoading) {
+      fetchSheetHistory();
+    }
+     
+  }, [activeTab, historySource]);
+
+
 
   // Live QR session helpers
   const createQrSession = async () => {
@@ -1728,14 +1769,30 @@ const DeptAdminDashboard = () => {
           <Card>
             <CardHeader>
               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-                <CardTitle className="text-lg">Attendance History</CardTitle>
-                <div className="flex flex-wrap gap-2">
-                  {/* <SheetsActions
-                    busy={sheetsBusy}
-                    size="sm"
-                    onExport={() => pushToGoogleSheets('export_all')}
-                    onSync={() => pushToGoogleSheets('sync_unsynced')}
-                  /> */}
+                <div>
+                  <CardTitle className="text-lg">Attendance History</CardTitle>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    {historySource === 'sheet'
+                      ? <>Source: <span className="font-medium">Google Sheet</span>{sheetUrl && <> · <a href={sheetUrl} target="_blank" rel="noreferrer" className="underline">Open sheet</a></>}</>
+                      : <>Source: <span className="font-medium">Local database</span></>}
+                  </p>
+                </div>
+                <div className="flex flex-wrap gap-2 items-center">
+                  <Select value={historySource} onValueChange={(v: any) => setHistorySource(v)}>
+                    <SelectTrigger className="w-[170px]">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="sheet">Google Sheet</SelectItem>
+                      <SelectItem value="local">Local database</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  {historySource === 'sheet' && (
+                    <Button size="sm" variant="outline" onClick={fetchSheetHistory} disabled={sheetHistoryLoading}>
+                      {sheetHistoryLoading ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <RefreshCw className="w-4 h-4 mr-1" />}
+                      Refresh
+                    </Button>
+                  )}
                   <Button
                     variant="destructive"
                     size="sm"
@@ -1747,6 +1804,7 @@ const DeptAdminDashboard = () => {
                   </Button>
                 </div>
               </div>
+
               <div className="flex flex-col sm:flex-row gap-2 mt-3">
                 <div className="relative flex-1">
                   <Search className="absolute left-2.5 top-2.5 w-4 h-4 text-muted-foreground" />
@@ -1803,17 +1861,28 @@ const DeptAdminDashboard = () => {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {filteredHistory
-                      .filter(r => {
+                    {(() => {
+                      const source = historySource === 'sheet' ? sheetHistory : filteredHistory;
+                      const filtered = source.filter(r => {
                         if (!searchQuery.trim()) return true;
                         const q = searchQuery.toLowerCase();
                         return (
                           (r.students?.name?.toLowerCase().includes(q)) ||
                           (r.students?.matric_no?.toLowerCase().includes(q))
                         );
-                      })
-                      .slice(0, 100)
-                      .map((r, idx) => (
+                      });
+                      if (filtered.length === 0) {
+                        return (
+                          <TableRow>
+                            <TableCell colSpan={7} className="text-center text-muted-foreground py-8">
+                              {historySource === 'sheet'
+                                ? (sheetHistoryLoading ? 'Loading from Google Sheet...' : 'No records found in the Google Sheet for your department.')
+                                : 'No attendance records yet. Start marking attendance!'}
+                            </TableCell>
+                          </TableRow>
+                        );
+                      }
+                      return filtered.slice(0, 100).map((r, idx) => (
                         <TableRow key={r.id}>
                           <TableCell className="text-center font-medium">{idx + 1}</TableCell>
                           <TableCell className="max-w-[200px] truncate" title={r.students?.name ?? 'Unknown'}>
@@ -1833,14 +1902,8 @@ const DeptAdminDashboard = () => {
                             </span>
                           </TableCell>
                         </TableRow>
-                      ))}
-                    {filteredHistory.length === 0 && (
-                      <TableRow>
-                        <TableCell colSpan={7} className="text-center text-muted-foreground py-8">
-                          No attendance records yet. Start marking attendance!
-                        </TableCell>
-                      </TableRow>
-                    )}
+                      ));
+                    })()}
                   </TableBody>
                 </Table>
               </div>
