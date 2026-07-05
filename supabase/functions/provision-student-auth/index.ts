@@ -66,15 +66,18 @@ Deno.serve(async (req) => {
 
       if (action === 'reset_login') {
         await admin.from('students').update({ first_login_at: null }).eq('id', s.id);
+        await admin.from('student_login_events').insert({
+          student_id: s.id,
+          department_id: s.department_id,
+          matric_no: s.matric_no,
+          event: 'reset',
+          actor_user_id: user.id,
+        });
         results.push({ id: s.id, name: s.name, matric_no: s.matric_no, status: 'login_reset' });
         continue;
       }
 
       if (action === 'reset_password' && authUserId) {
-        await admin.auth.admin.updateUserById(authUserId, { password });
-        results.push({ id: s.id, name: s.name, matric_no: s.matric_no, email, status: 'password_reset' });
-        continue;
-      }
         await admin.auth.admin.updateUserById(authUserId, { password });
         results.push({ id: s.id, name: s.name, matric_no: s.matric_no, email, status: 'password_reset' });
         continue;
