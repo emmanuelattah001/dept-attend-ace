@@ -1090,6 +1090,43 @@ const DeptAdminDashboard = () => {
     if (activeTab === 'logins') fetchLoginEvents();
   }, [activeTab]);
 
+  const fetchSheetHistory = async () => {
+    setSheetHistoryLoading(true);
+    try {
+      const { data, error } = await (supabase as any).functions.invoke('sheets-sync', {
+        body: { action: 'read_all' },
+      });
+      if (error) throw error;
+      if (!data?.ok) throw new Error(data?.error || 'Failed to read Google Sheet');
+      setSheetUrl(data.spreadsheetUrl ?? null);
+      const rows: AttendanceRecord[] = (data.rows ?? []).map((r: any, i: number) => ({
+        id: r.attendance_id || `sheet-${i}`,
+        student_ref: '',
+        course_id: '',
+        date: r.date,
+        status: (r.status || '').toLowerCase(),
+        students: { name: r.student_name, matric_no: r.matric_no, gender: r.gender },
+        courses: { name: r.course_name, code: r.course_code },
+      }) as AttendanceRecord);
+      // newest first by date
+      rows.sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+      setSheetHistory(rows);
+    } catch (e: any) {
+      console.error('sheet history error', e);
+      toast.error(e?.message || 'Failed to load Google Sheet history');
+    } finally {
+      setSheetHistoryLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (activeTab === 'history' && historySource === 'sheet' && sheetHistory.length === 0 && !sheetHistoryLoading) {
+      fetchSheetHistory();
+    }
+     
+  }, [activeTab, historySource]);
+
+
 
   // Live QR session helpers
   const createQrSession = async () => {
