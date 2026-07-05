@@ -1847,6 +1847,118 @@ const DeptAdminDashboard = () => {
             </CardContent>
           </Card>
         )}
+
+        {activeTab === 'logins' && (
+          <Card>
+            <CardHeader>
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                <CardTitle className="text-lg flex items-center gap-2">
+                  <ShieldCheck className="w-5 h-5" /> Student Login Audit Log
+                </CardTitle>
+                <Button size="sm" variant="outline" onClick={fetchLoginEvents} disabled={loginEventsLoading}>
+                  {loginEventsLoading ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <RefreshCw className="w-4 h-4 mr-1" />}
+                  Refresh
+                </Button>
+              </div>
+              <div className="flex flex-col sm:flex-row gap-2 mt-3">
+                <div className="relative flex-1">
+                  <Search className="absolute left-2.5 top-2.5 w-4 h-4 text-muted-foreground" />
+                  <Input
+                    placeholder="Search by matric no or name..."
+                    value={loginEventSearch}
+                    onChange={e => setLoginEventSearch(e.target.value)}
+                    className="pl-8"
+                  />
+                </div>
+                <Select value={loginEventFilter} onValueChange={(v: any) => setLoginEventFilter(v)}>
+                  <SelectTrigger className="w-[200px]">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All events</SelectItem>
+                    <SelectItem value="success">Successful logins</SelectItem>
+                    <SelectItem value="blocked_already_used">Blocked (already used)</SelectItem>
+                    <SelectItem value="reset">Admin resets</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </CardHeader>
+            <CardContent>
+              <div className="overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="w-12 text-center">S/N</TableHead>
+                      <TableHead>Student</TableHead>
+                      <TableHead>Matric No</TableHead>
+                      <TableHead>Event</TableHead>
+                      <TableHead>When</TableHead>
+                      <TableHead>Details</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {(() => {
+                      const q = loginEventSearch.trim().toLowerCase();
+                      const rows = loginEvents.filter(ev => {
+                        if (loginEventFilter !== 'all' && ev.event !== loginEventFilter) return false;
+                        if (!q) return true;
+                        const stu = students.find(s => s.id === ev.student_id);
+                        return (
+                          (ev.matric_no?.toLowerCase().includes(q)) ||
+                          (stu?.name?.toLowerCase().includes(q))
+                        );
+                      });
+                      if (rows.length === 0) {
+                        return (
+                          <TableRow>
+                            <TableCell colSpan={6} className="text-center text-muted-foreground py-8">
+                              {loginEventsLoading ? 'Loading...' : 'No login events yet.'}
+                            </TableCell>
+                          </TableRow>
+                        );
+                      }
+                      const styles: Record<string, string> = {
+                        success: 'bg-green-100 text-green-700',
+                        blocked_already_used: 'bg-red-100 text-red-700',
+                        reset: 'bg-amber-100 text-amber-700',
+                      };
+                      const labels: Record<string, string> = {
+                        success: 'Signed in',
+                        blocked_already_used: 'Blocked',
+                        reset: 'Admin reset',
+                      };
+                      return rows.map((ev, idx) => {
+                        const stu = students.find(s => s.id === ev.student_id);
+                        return (
+                          <TableRow key={ev.id}>
+                            <TableCell className="text-center font-medium">{idx + 1}</TableCell>
+                            <TableCell className="max-w-[200px] truncate" title={stu?.name ?? '—'}>
+                              {stu?.name ?? '—'}
+                            </TableCell>
+                            <TableCell>{ev.matric_no ?? '—'}</TableCell>
+                            <TableCell>
+                              <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${styles[ev.event] || 'bg-muted'}`}>
+                                {labels[ev.event] || ev.event}
+                              </span>
+                            </TableCell>
+                            <TableCell className="text-sm whitespace-nowrap">
+                              {new Date(ev.created_at).toLocaleString()}
+                            </TableCell>
+                            <TableCell className="text-xs text-muted-foreground">
+                              {ev.event === 'blocked_already_used' && ev.detail?.first_login_at
+                                ? `First login: ${new Date(ev.detail.first_login_at).toLocaleString()}`
+                                : '—'}
+                            </TableCell>
+                          </TableRow>
+                        );
+                      });
+                    })()}
+                  </TableBody>
+                </Table>
+              </div>
+            </CardContent>
+          </Card>
+        )}
       </div>
     </DashboardLayout>
   );
