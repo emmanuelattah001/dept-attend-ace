@@ -181,7 +181,7 @@ Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
   try {
     const body = await req.json().catch(() => ({}));
-    const action: 'append' | 'sync_unsynced' | 'export_all' | 'lookup_by_matric' = body.action || 'sync_unsynced';
+    const action: 'append' | 'sync_unsynced' | 'export_all' | 'lookup_by_matric' | 'read_all' = body.action || 'sync_unsynced';
 
     const saJson = Deno.env.get('GOOGLE_SERVICE_ACCOUNT_JSON');
     if (!saJson) throw new Error('GOOGLE_SERVICE_ACCOUNT_JSON not configured');
