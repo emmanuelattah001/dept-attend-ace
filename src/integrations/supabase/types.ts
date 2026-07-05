@@ -261,6 +261,54 @@ export type Database = {
           },
         ]
       }
+      student_login_events: {
+        Row: {
+          actor_user_id: string | null
+          created_at: string
+          department_id: string | null
+          detail: Json | null
+          event: string
+          id: string
+          matric_no: string | null
+          student_id: string | null
+        }
+        Insert: {
+          actor_user_id?: string | null
+          created_at?: string
+          department_id?: string | null
+          detail?: Json | null
+          event: string
+          id?: string
+          matric_no?: string | null
+          student_id?: string | null
+        }
+        Update: {
+          actor_user_id?: string | null
+          created_at?: string
+          department_id?: string | null
+          detail?: Json | null
+          event?: string
+          id?: string
+          matric_no?: string | null
+          student_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "student_login_events_department_id_fkey"
+            columns: ["department_id"]
+            isOneToOne: false
+            referencedRelation: "departments"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "student_login_events_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
+            referencedRelation: "students"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       students: {
         Row: {
           auth_user_id: string | null
