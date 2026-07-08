@@ -996,10 +996,10 @@ const DeptAdminDashboard = () => {
 
   const studentStats = useMemo(() => {
     const month = new Date().toISOString().slice(0, 7);
-    const filteredHistoryForStats = selectedCourse 
-      ? history.filter(r => r.course_id === selectedCourse)
+    const filteredHistoryForStats = historyCourseFilter !== 'all'
+      ? history.filter(r => r.course_id === historyCourseFilter)
       : history;
-      
+
     return students.map(student => {
       const records = filteredHistoryForStats.filter(
         r => r.student_ref === student.id && r.date.startsWith(month)
@@ -1009,7 +1009,7 @@ const DeptAdminDashboard = () => {
       const percent = total ? (present / total) * 100 : 0;
       return { ...student, present, total, percent };
     });
-  }, [students, history, selectedCourse]);
+  }, [students, history, historyCourseFilter]);
 
   const filteredStats = useMemo(() => {
     let result = studentStats;
@@ -1029,9 +1029,9 @@ const DeptAdminDashboard = () => {
   }, [studentStats, searchQuery, filterPercent]);
 
   const filteredHistory = useMemo(() => {
-    if (!selectedCourse) return history;
-    return history.filter(r => r.course_id === selectedCourse);
-  }, [history, selectedCourse]);
+    if (historyCourseFilter === 'all') return history;
+    return history.filter(r => r.course_id === historyCourseFilter);
+  }, [history, historyCourseFilter]);
 
   const pendingSyncCount = localAttendance.filter(item => !item.synced).length;
   const failedSyncCount = localAttendance.filter(item => item.error && !item.synced).length;
