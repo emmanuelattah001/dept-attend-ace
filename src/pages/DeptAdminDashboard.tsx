@@ -1816,6 +1816,19 @@ const DeptAdminDashboard = () => {
                     className="pl-8"
                   />
                 </div>
+                <Select value={historyCourseFilter} onValueChange={setHistoryCourseFilter}>
+                  <SelectTrigger className="w-[180px]">
+                    <SelectValue placeholder="Filter by course" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Courses</SelectItem>
+                    {courses.map(course => (
+                      <SelectItem key={course.id} value={course.id}>
+                        {course.code} - {course.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
                 <Select value={filterPercent} onValueChange={setFilterPercent}>
                   <SelectTrigger className="w-[180px]">
                     <SelectValue placeholder="Filter by %" />
