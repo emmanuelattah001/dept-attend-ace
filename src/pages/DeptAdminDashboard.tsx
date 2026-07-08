@@ -1877,7 +1877,17 @@ const DeptAdminDashboard = () => {
                   <TableBody>
                     {(() => {
                       const source = historySource === 'sheet' ? sheetHistory : filteredHistory;
+                      const selectedCourseCode = historyCourseFilter !== 'all'
+                        ? courses.find(c => c.id === historyCourseFilter)?.code
+                        : null;
                       const filtered = source.filter(r => {
+                        if (historyCourseFilter !== 'all') {
+                          if (historySource === 'sheet') {
+                            if (r.courses?.code !== selectedCourseCode) return false;
+                          } else {
+                            if (r.course_id !== historyCourseFilter) return false;
+                          }
+                        }
                         if (!searchQuery.trim()) return true;
                         const q = searchQuery.toLowerCase();
                         return (
@@ -1890,8 +1900,10 @@ const DeptAdminDashboard = () => {
                           <TableRow>
                             <TableCell colSpan={7} className="text-center text-muted-foreground py-8">
                               {historySource === 'sheet'
-                                ? (sheetHistoryLoading ? 'Loading from Google Sheet...' : 'No records found in the Google Sheet for your department.')
-                                : 'No attendance records yet. Start marking attendance!'}
+                                ? (sheetHistoryLoading ? 'Loading from Google Sheet...' : 'No records found in the Google Sheet for the selected course.')
+                                : historyCourseFilter !== 'all'
+                                  ? 'No attendance records for the selected course.'
+                                  : 'No attendance records yet. Start marking attendance!'}
                             </TableCell>
                           </TableRow>
                         );
