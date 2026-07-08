@@ -126,6 +126,7 @@ const DeptAdminDashboard = () => {
   const [importing, setImporting] = useState(false);
   const [initialLoading, setInitialLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
+  const [historyCourseFilter, setHistoryCourseFilter] = useState<string>('all');
   const [filterPercent, setFilterPercent] = useState<string>('all');
   const [deletingHistory, setDeletingHistory] = useState(false);
 
@@ -995,10 +996,10 @@ const DeptAdminDashboard = () => {
 
   const studentStats = useMemo(() => {
     const month = new Date().toISOString().slice(0, 7);
-    const filteredHistoryForStats = selectedCourse 
-      ? history.filter(r => r.course_id === selectedCourse)
+    const filteredHistoryForStats = historyCourseFilter !== 'all'
+      ? history.filter(r => r.course_id === historyCourseFilter)
       : history;
-      
+
     return students.map(student => {
       const records = filteredHistoryForStats.filter(
         r => r.student_ref === student.id && r.date.startsWith(month)
@@ -1008,7 +1009,7 @@ const DeptAdminDashboard = () => {
       const percent = total ? (present / total) * 100 : 0;
       return { ...student, present, total, percent };
     });
-  }, [students, history, selectedCourse]);
+  }, [students, history, historyCourseFilter]);
 
   const filteredStats = useMemo(() => {
     let result = studentStats;
@@ -1028,9 +1029,9 @@ const DeptAdminDashboard = () => {
   }, [studentStats, searchQuery, filterPercent]);
 
   const filteredHistory = useMemo(() => {
-    if (!selectedCourse) return history;
-    return history.filter(r => r.course_id === selectedCourse);
-  }, [history, selectedCourse]);
+    if (historyCourseFilter === 'all') return history;
+    return history.filter(r => r.course_id === historyCourseFilter);
+  }, [history, historyCourseFilter]);
 
   const pendingSyncCount = localAttendance.filter(item => !item.synced).length;
   const failedSyncCount = localAttendance.filter(item => item.error && !item.synced).length;
@@ -1815,6 +1816,19 @@ const DeptAdminDashboard = () => {
                     className="pl-8"
                   />
                 </div>
+                <Select value={historyCourseFilter} onValueChange={setHistoryCourseFilter}>
+                  <SelectTrigger className="w-[180px]">
+                    <SelectValue placeholder="Filter by course" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Courses</SelectItem>
+                    {courses.map(course => (
+                      <SelectItem key={course.id} value={course.id}>
+                        {course.code} - {course.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
                 <Select value={filterPercent} onValueChange={setFilterPercent}>
                   <SelectTrigger className="w-[180px]">
                     <SelectValue placeholder="Filter by %" />
@@ -1863,7 +1877,17 @@ const DeptAdminDashboard = () => {
                   <TableBody>
                     {(() => {
                       const source = historySource === 'sheet' ? sheetHistory : filteredHistory;
+                      const selectedCourseCode = historyCourseFilter !== 'all'
+                        ? courses.find(c => c.id === historyCourseFilter)?.code
+                        : null;
                       const filtered = source.filter(r => {
+                        if (historyCourseFilter !== 'all') {
+                          if (historySource === 'sheet') {
+                            if (r.courses?.code !== selectedCourseCode) return false;
+                          } else {
+                            if (r.course_id !== historyCourseFilter) return false;
+                          }
+                        }
                         if (!searchQuery.trim()) return true;
                         const q = searchQuery.toLowerCase();
                         return (
@@ -1876,8 +1900,10 @@ const DeptAdminDashboard = () => {
                           <TableRow>
                             <TableCell colSpan={7} className="text-center text-muted-foreground py-8">
                               {historySource === 'sheet'
-                                ? (sheetHistoryLoading ? 'Loading from Google Sheet...' : 'No records found in the Google Sheet for your department.')
-                                : 'No attendance records yet. Start marking attendance!'}
+                                ? (sheetHistoryLoading ? 'Loading from Google Sheet...' : 'No records found in the Google Sheet for the selected course.')
+                                : historyCourseFilter !== 'all'
+                                  ? 'No attendance records for the selected course.'
+                                  : 'No attendance records yet. Start marking attendance!'}
                             </TableCell>
                           </TableRow>
                         );
