@@ -126,6 +126,7 @@ const DeptAdminDashboard = () => {
   const [importing, setImporting] = useState(false);
   const [initialLoading, setInitialLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
+  const [historyCourseFilter, setHistoryCourseFilter] = useState<string>('all');
   const [filterPercent, setFilterPercent] = useState<string>('all');
   const [deletingHistory, setDeletingHistory] = useState(false);
 
