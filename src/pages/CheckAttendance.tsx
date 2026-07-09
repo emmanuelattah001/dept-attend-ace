@@ -104,7 +104,7 @@ const CheckAttendance = () => {
 
         <Card>
           <CardContent className="pt-6">
-            <div className="flex gap-2">
+            <div className="flex flex-col sm:flex-row gap-2">
               <Input
                 placeholder="AU25AC8017"
                 value={matricNo}
@@ -112,7 +112,7 @@ const CheckAttendance = () => {
                 onKeyDown={e => e.key === 'Enter' && handleSearch()}
                 maxLength={30}
               />
-              <Button onClick={handleSearch} disabled={loading}>
+              <Button onClick={handleSearch} disabled={loading} className="w-full sm:w-auto">
                 <Search className="w-4 h-4 mr-1" />
                 {loading ? 'Searching...' : 'Search'}
               </Button>
