@@ -1233,10 +1233,10 @@ const DeptAdminDashboard = () => {
   return (
     <DashboardLayout>
       <div className="space-y-6">
-        <div className="flex justify-between items-start">
-          <div>
-            <h2 className="text-2xl font-bold">Department Admin Dashboard</h2>
-            <p className="text-muted-foreground text-sm mt-1">
+        <div className="flex flex-wrap justify-between items-start gap-3">
+          <div className="min-w-0">
+            <h2 className="text-xl sm:text-2xl font-bold">Department Admin Dashboard</h2>
+            <p className="text-muted-foreground text-sm mt-1 truncate">
               Department: <span className="font-semibold text-foreground">{departmentName}</span>
             </p>
           </div>
@@ -1329,13 +1329,13 @@ const DeptAdminDashboard = () => {
           </CardContent>
         </Card>
 
-        <div className="flex flex-wrap items-center justify-between gap-2 border-b pb-2">
-          <div className="flex gap-2">
+        <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3 border-b pb-2">
+          <div className="flex gap-1 overflow-x-auto -mx-1 px-1 scrollbar-thin">
             {tabs.map(tab => (
               <button
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id)}
-                className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${
+                className={`flex items-center gap-2 px-3 sm:px-4 py-2.5 text-sm font-medium border-b-2 whitespace-nowrap transition-colors ${
                   activeTab === tab.id ? 'border-primary text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'
                 }`}
               >
@@ -1345,15 +1345,15 @@ const DeptAdminDashboard = () => {
           </div>
           <div className="flex flex-wrap gap-2">
             <Button size="sm" variant="default" onClick={() => { setQrCourseId(selectedCourse || ''); setShowQrDialog(true); }}>
-              <QrCode className="w-4 h-4 mr-1" /> Live QR Session
+              <QrCode className="w-4 h-4 sm:mr-1" /> <span className="hidden sm:inline">Live QR Session</span><span className="sm:hidden">QR</span>
             </Button>
             <Button size="sm" variant="outline" onClick={provisionStudentLogins} disabled={provisioningAuth}>
-              {provisioningAuth ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <KeyRound className="w-4 h-4 mr-1" />}
-              Create Student Logins
+              {provisioningAuth ? <Loader2 className="w-4 h-4 sm:mr-1 animate-spin" /> : <KeyRound className="w-4 h-4 sm:mr-1" />}
+              <span className="hidden sm:inline">Create Student Logins</span><span className="sm:hidden">Create</span>
             </Button>
             <Button size="sm" variant="outline" onClick={resetStudentLogins} disabled={resettingLogins}>
-              {resettingLogins ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <KeyRound className="w-4 h-4 mr-1" />}
-              Reset Login Lock
+              {resettingLogins ? <Loader2 className="w-4 h-4 sm:mr-1 animate-spin" /> : <KeyRound className="w-4 h-4 sm:mr-1" />}
+              <span className="hidden sm:inline">Reset Login Lock</span><span className="sm:hidden">Reset</span>
             </Button>
             <SheetsActions
               busy={sheetsBusy}
@@ -1817,7 +1817,7 @@ const DeptAdminDashboard = () => {
                   />
                 </div>
                 <Select value={historyCourseFilter} onValueChange={setHistoryCourseFilter}>
-                  <SelectTrigger className="w-[180px]">
+                  <SelectTrigger className="w-full sm:w-[180px]">
                     <SelectValue placeholder="Filter by course" />
                   </SelectTrigger>
                   <SelectContent>
@@ -1830,7 +1830,7 @@ const DeptAdminDashboard = () => {
                   </SelectContent>
                 </Select>
                 <Select value={filterPercent} onValueChange={setFilterPercent}>
-                  <SelectTrigger className="w-[180px]">
+                  <SelectTrigger className="w-full sm:w-[180px]">
                     <SelectValue placeholder="Filter by %" />
                   </SelectTrigger>
                   <SelectContent>
@@ -1960,7 +1960,7 @@ const DeptAdminDashboard = () => {
                   />
                 </div>
                 <Select value={loginEventFilter} onValueChange={(v: any) => setLoginEventFilter(v)}>
-                  <SelectTrigger className="w-[200px]">
+                  <SelectTrigger className="w-full sm:w-[200px]">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
