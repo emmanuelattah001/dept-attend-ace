@@ -102,11 +102,20 @@ const DeptAdminDashboard = () => {
   const [qrEnding, setQrEnding] = useState(false);
   const [provisioningAuth, setProvisioningAuth] = useState(false);
   const [now, setNow] = useState(Date.now());
+  const [rotatingCode, setRotatingCode] = useState<string | null>(null);
   useEffect(() => {
-    if (!qrSession) return;
+    if (!qrSession) { setRotatingCode(null); return; }
     const id = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(id);
+    let cancelled = false;
+    const pull = async () => {
+      const { data } = await supabase.functions.invoke('session-token', { body: { token: qrSession.token } });
+      if (!cancelled && (data as any)?.code) setRotatingCode((data as any).code);
+    };
+    pull();
+    const poll = setInterval(pull, 10_000);
+    return () => { cancelled = true; clearInterval(id); clearInterval(poll); };
   }, [qrSession]);
+
 
 
   const [showAddDialog, setShowAddDialog] = useState(false);
