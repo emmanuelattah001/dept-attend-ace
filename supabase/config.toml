@@ -1,1 +1,10 @@
 project_id = "wlevpfiijyweeshymyly"
+
+[functions.mark-via-qr]
+verify_jwt = true
+
+[functions.verify-face]
+verify_jwt = true
+
+[functions.session-token]
+verify_jwt = true

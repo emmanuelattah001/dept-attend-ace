@@ -8,6 +8,8 @@ import { Button } from '@/components/ui/button';
 import { CalendarCheck, CheckCircle, XCircle, QrCode } from 'lucide-react';
 import DashboardLayout from '@/components/DashboardLayout';
 import LoadingScreen from '@/components/LoadingScreen';
+import FaceEnrollment from '@/components/FaceEnrollment';
+
 
 interface AttendanceRecord {
   id: string;
@@ -22,20 +24,24 @@ const StudentDashboard = () => {
   const navigate = useNavigate();
   const [records, setRecords] = useState<AttendanceRecord[]>([]);
   const [stats, setStats] = useState({ present: 0, absent: 0, total: 0, percentage: 0 });
+  const [faceEnrolledAt, setFaceEnrolledAt] = useState<string | null>(null);
   const [initialLoading, setInitialLoading] = useState(true);
+
 
   useEffect(() => {
     if (!user) return;
     const fetchAttendance = async () => {
       const { data: studentRow, error: studentError } = await supabase
         .from('students')
-        .select('id, matric_no')
+        .select('id, matric_no, face_enrolled_at')
         .eq('auth_user_id', user.id)
         .maybeSingle();
 
       if (studentError) console.error('Student lookup failed:', studentError);
       const matric = studentRow?.matric_no;
       const studentId = studentRow?.id;
+      setFaceEnrolledAt((studentRow as any)?.face_enrolled_at ?? null);
+
 
       // Query DB directly (source of truth for recent records) + Sheet (archive) in parallel.
       const [dbRes, sheetRes, progressRes] = await Promise.all([
