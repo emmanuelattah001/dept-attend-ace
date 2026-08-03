@@ -93,7 +93,7 @@ const AuthPage = () => {
           <div className="mx-auto w-12 h-12 bg-primary rounded-xl flex items-center justify-center mb-2">
             <ClipboardCheck className="w-6 h-6 text-primary-foreground" />
           </div>
-          <CardTitle className="text-2xl">AttendTrack</CardTitle>
+          <CardTitle className="text-2xl">AIPS</CardTitle>
           <CardDescription>Sign in to your account</CardDescription>
         </CardHeader>
         <CardContent>

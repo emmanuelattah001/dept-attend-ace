@@ -10,36 +10,37 @@ import LoadingScreen from '@/components/LoadingScreen';
 
 const features = [
   {
-    icon: Users,
-    title: 'Student Management',
-    description: 'Easily register and manage students across multiple departments with bulk import support.',
+    icon: ShieldCheck,
+    title: 'Multi-Factor Presence Proof',
+    description: 'Every scan is verified by a rotating QR code, face match, GPS geofence and device fingerprint before it counts.',
   },
   {
-    icon: ClipboardCheck,
-    title: 'Quick Attendance Marking',
-    description: 'Mark attendance for entire classes in seconds with an intuitive checkbox interface.',
+    icon: Zap,
+    title: 'Dynamic Rotating QR',
+    description: 'Session codes refresh every 30 seconds, so screenshots shared with absent friends simply stop working.',
+  },
+  {
+    icon: Users,
+    title: 'Roles for Every Level',
+    description: 'Students, course reps, lecturers, HODs and school admins each get a dashboard scoped to what they own.',
+  },
+  {
+    icon: BarChart3,
+    title: 'Confidence Scoring',
+    description: 'Each record carries a 0-100 verification score with the exact proofs behind it, ready for audit.',
+  },
+  {
+    icon: FileText,
+    title: 'PDF Reports & Sheets Archive',
+    description: 'Export branded attendance reports and keep a permanent Google Sheets archive of every record.',
   },
   {
     icon: Search,
     title: 'Instant Lookup',
     description: 'Students can check their own attendance anytime using just their matric number — no login needed.',
   },
-  {
-    icon: BarChart3,
-    title: 'Real-time Statistics',
-    description: 'View attendance rates, present/absent counts, and trends at a glance from the dashboard.',
-  },
-  {
-    icon: FileText,
-    title: 'PDF Reports',
-    description: 'Generate and share professional attendance reports as branded PDF documents.',
-  },
-  {
-    icon: ShieldCheck,
-    title: 'Role-Based Access',
-    description: 'Department admins(course rep), and students each get tailored dashboards and permissions.',
-  },
 ];
+
 
 const LandingPage = () => {
   const navigate = useNavigate();
@@ -52,15 +53,17 @@ const LandingPage = () => {
         <div className="container mx-auto px-4 py-20 sm:py-28 relative">
           <div className="max-w-2xl mx-auto text-center space-y-6">
             <div className="mx-auto w-16 h-16 bg-primary rounded-2xl flex items-center justify-center shadow-lg">
-              <ClipboardCheck className="w-8 h-8 text-primary-foreground" />
+              <ShieldCheck className="w-8 h-8 text-primary-foreground" />
             </div>
+            <p className="text-xs uppercase tracking-widest text-muted-foreground">Achievers University</p>
             <h1 className="text-4xl sm:text-5xl font-heading font-bold tracking-tight">
-              Smart Attendance,{' '}
-              <span className="text-primary">Made Simple</span>
+              Intelligent Attendance &{' '}
+              <span className="text-primary">Presence Verification</span>
             </h1>
             <p className="text-lg text-muted-foreground max-w-lg mx-auto">
-              AttendTrack helps institutions track, manage, and share student attendance effortlessly — from marking to PDF reports, all in one place.
+              AIPS proves who was actually in the room — rotating QR codes, face matching, GPS geofencing and device proof, combined into one confidence score.
             </p>
+
             <div className="flex flex-col sm:flex-row gap-3 justify-center pt-2">
               <Button onClick={() => navigate('/check-attendance')} size="lg" className="text-base">
                 <Search className="w-5 h-5 mr-2" /> Check My Attendance
@@ -105,7 +108,7 @@ const LandingPage = () => {
           </div>
           <div className="grid sm:grid-cols-3 gap-8 max-w-3xl mx-auto">
             {[
-              { step: '1', icon: Smartphone, title: 'Open the App', desc: 'Access AttendTrack from any device — mobile, tablet, or desktop.' },
+              { step: '1', icon: Smartphone, title: 'Open the App', desc: 'Access AIPS from any device — mobile, tablet, or desktop.' },
               { step: '2', icon: ClipboardCheck, title: 'Mark Attendance', desc: 'Admins select a date, pick students, and mark present or absent.' },
               { step: '3', icon: Zap, title: 'View & Share', desc: 'Students check records instantly. Admins export branded PDF reports.' },
             ].map((s) => (
@@ -140,7 +143,7 @@ const LandingPage = () => {
       {/* Footer */}
       <footer className="border-t py-6">
         <div className="container mx-auto px-4 text-center text-sm text-muted-foreground">
-          © {new Date().getFullYear()} AttendTrack. Built for smarter attendance management.
+          © {new Date().getFullYear()} AIPS · Achievers University. Verified presence, not just signatures.
         </div>
       </footer>
     </div>
@@ -160,6 +163,9 @@ const Index = () => {
     case 'super_admin':
       return <SuperAdminDashboard />;
     case 'dept_admin':
+    case 'hod':
+    case 'lecturer':
+    case 'course_rep':
       return <DeptAdminDashboard />;
     case 'student':
     default:
@@ -168,3 +174,4 @@ const Index = () => {
 };
 
 export default Index;
+
