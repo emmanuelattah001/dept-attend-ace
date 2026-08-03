@@ -34,43 +34,52 @@ export type Database = {
       }
       attendance: {
         Row: {
+          confidence_score: number | null
           course_id: string
           created_at: string
           date: string
           department_id: string
           id: string
           marked_by: string
+          proofs: Json
           status: Database["public"]["Enums"]["attendance_status"]
           student_id: string | null
           student_ref: string | null
           synced_at: string | null
           synced_to_sheets: boolean
+          verified_via: string
         }
         Insert: {
+          confidence_score?: number | null
           course_id: string
           created_at?: string
           date?: string
           department_id: string
           id?: string
           marked_by: string
+          proofs?: Json
           status?: Database["public"]["Enums"]["attendance_status"]
           student_id?: string | null
           student_ref?: string | null
           synced_at?: string | null
           synced_to_sheets?: boolean
+          verified_via?: string
         }
         Update: {
+          confidence_score?: number | null
           course_id?: string
           created_at?: string
           date?: string
           department_id?: string
           id?: string
           marked_by?: string
+          proofs?: Json
           status?: Database["public"]["Enums"]["attendance_status"]
           student_id?: string | null
           student_ref?: string | null
           synced_at?: string | null
           synced_to_sheets?: boolean
+          verified_via?: string
         }
         Relationships: [
           {
@@ -117,11 +126,16 @@ export type Database = {
           created_by: string
           date: string
           department_id: string
+          ends_at: string | null
           expires_at: string
           id: string
           latitude: number | null
           longitude: number | null
           radius_m: number | null
+          rotate_seconds: number
+          rotating: boolean
+          secret: string
+          starts_at: string
           token: string
         }
         Insert: {
@@ -130,11 +144,16 @@ export type Database = {
           created_by: string
           date?: string
           department_id: string
+          ends_at?: string | null
           expires_at: string
           id?: string
           latitude?: number | null
           longitude?: number | null
           radius_m?: number | null
+          rotate_seconds?: number
+          rotating?: boolean
+          secret?: string
+          starts_at?: string
           token: string
         }
         Update: {
@@ -143,11 +162,16 @@ export type Database = {
           created_by?: string
           date?: string
           department_id?: string
+          ends_at?: string | null
           expires_at?: string
           id?: string
           latitude?: number | null
           longitude?: number | null
           radius_m?: number | null
+          rotate_seconds?: number
+          rotating?: boolean
+          secret?: string
+          starts_at?: string
           token?: string
         }
         Relationships: [
@@ -160,6 +184,51 @@ export type Database = {
           },
           {
             foreignKeyName: "attendance_sessions_department_id_fkey"
+            columns: ["department_id"]
+            isOneToOne: false
+            referencedRelation: "departments"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      course_staff: {
+        Row: {
+          course_id: string
+          created_at: string
+          department_id: string | null
+          id: string
+          staff_role: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          course_id: string
+          created_at?: string
+          department_id?: string | null
+          id?: string
+          staff_role: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          course_id?: string
+          created_at?: string
+          department_id?: string | null
+          id?: string
+          staff_role?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "course_staff_course_id_fkey"
+            columns: ["course_id"]
+            isOneToOne: false
+            referencedRelation: "courses"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "course_staff_department_id_fkey"
             columns: ["department_id"]
             isOneToOne: false
             referencedRelation: "departments"
@@ -314,6 +383,9 @@ export type Database = {
           auth_user_id: string | null
           created_at: string | null
           department_id: string
+          device_fingerprint: string | null
+          face_enrolled_at: string | null
+          face_url: string | null
           first_login_at: string | null
           gender: string | null
           id: string
@@ -324,6 +396,9 @@ export type Database = {
           auth_user_id?: string | null
           created_at?: string | null
           department_id: string
+          device_fingerprint?: string | null
+          face_enrolled_at?: string | null
+          face_url?: string | null
           first_login_at?: string | null
           gender?: string | null
           id?: string
@@ -334,6 +409,9 @@ export type Database = {
           auth_user_id?: string | null
           created_at?: string | null
           department_id?: string
+          device_fingerprint?: string | null
+          face_enrolled_at?: string | null
+          face_url?: string | null
           first_login_at?: string | null
           gender?: string | null
           id?: string
@@ -368,6 +446,74 @@ export type Database = {
         }
         Relationships: []
       }
+      verification_events: {
+        Row: {
+          confidence_score: number | null
+          course_id: string | null
+          created_at: string
+          department_id: string | null
+          id: string
+          outcome: string
+          proofs: Json
+          reason: string | null
+          session_id: string | null
+          student_id: string | null
+        }
+        Insert: {
+          confidence_score?: number | null
+          course_id?: string | null
+          created_at?: string
+          department_id?: string | null
+          id?: string
+          outcome: string
+          proofs?: Json
+          reason?: string | null
+          session_id?: string | null
+          student_id?: string | null
+        }
+        Update: {
+          confidence_score?: number | null
+          course_id?: string | null
+          created_at?: string
+          department_id?: string | null
+          id?: string
+          outcome?: string
+          proofs?: Json
+          reason?: string | null
+          session_id?: string | null
+          student_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "verification_events_course_id_fkey"
+            columns: ["course_id"]
+            isOneToOne: false
+            referencedRelation: "courses"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "verification_events_department_id_fkey"
+            columns: ["department_id"]
+            isOneToOne: false
+            referencedRelation: "departments"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "verification_events_session_id_fkey"
+            columns: ["session_id"]
+            isOneToOne: false
+            referencedRelation: "attendance_sessions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "verification_events_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
+            referencedRelation: "students"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Views: {
       [_ in never]: never
@@ -392,7 +538,13 @@ export type Database = {
       }
     }
     Enums: {
-      app_role: "super_admin" | "dept_admin" | "student"
+      app_role:
+        | "super_admin"
+        | "dept_admin"
+        | "student"
+        | "lecturer"
+        | "course_rep"
+        | "hod"
       attendance_status: "present" | "absent" | "late"
     }
     CompositeTypes: {
@@ -521,7 +673,14 @@ export type CompositeTypes<
 export const Constants = {
   public: {
     Enums: {
-      app_role: ["super_admin", "dept_admin", "student"],
+      app_role: [
+        "super_admin",
+        "dept_admin",
+        "student",
+        "lecturer",
+        "course_rep",
+        "hod",
+      ],
       attendance_status: ["present", "absent", "late"],
     },
   },
