@@ -161,6 +161,9 @@ const StudentDashboard = () => {
           </Card>
         </div>
 
+        <FaceEnrollment enrolledAt={faceEnrolledAt} onEnrolled={setFaceEnrolledAt} />
+
+
         <Card>
           <CardHeader>
             <CardTitle className="text-lg">Attendance History</CardTitle>
