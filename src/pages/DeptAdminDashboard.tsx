@@ -1433,7 +1433,7 @@ const DeptAdminDashboard = () => {
                 </p>
               </div>
             ) : (() => {
-              const scanUrl = `${window.location.origin}/scan?token=${qrSession.token}`;
+              const scanUrl = `${window.location.origin}/scan?token=${qrSession.token}${rotatingCode ? `&c=${rotatingCode}` : ''}`;
               const remainingMs = new Date(qrSession.expires_at).getTime() - now;
               const remaining = Math.max(0, Math.floor(remainingMs / 1000));
               const mm = Math.floor(remaining / 60).toString().padStart(2, '0');
@@ -1444,8 +1444,12 @@ const DeptAdminDashboard = () => {
                   <div className="bg-white p-4 rounded-lg inline-block mx-auto">
                     <QRCodeCanvas value={scanUrl} size={240} includeMargin />
                   </div>
+                  {rotatingCode && (
+                    <p className="text-sm">Rotating code: <span className="font-mono font-bold tracking-widest">{rotatingCode}</span></p>
+                  )}
                   <p className="text-2xl font-mono font-bold">{expired ? 'EXPIRED' : `${mm}:${ss}`}</p>
                   <p className="text-xs text-muted-foreground break-all">{scanUrl}</p>
+
                   <div className="flex flex-wrap gap-2 justify-center">
                     <Button size="sm" variant="outline" onClick={() => { navigator.clipboard.writeText(scanUrl); toast.success('Link copied'); }}>
                       <Copy className="w-4 h-4 mr-1" /> Copy link
