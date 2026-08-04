@@ -1076,6 +1076,7 @@ const DeptAdminDashboard = () => {
     { id: 'mark' as const, label: 'Mark Attendance', icon: CalendarCheck },
     { id: 'students' as const, label: 'Students', icon: Users },
     { id: 'history' as const, label: 'History', icon: History },
+    { id: 'staff' as const, label: 'Staff & Reps', icon: BookOpen },
     { id: 'logins' as const, label: 'Login Log', icon: ShieldCheck },
   ];
 
