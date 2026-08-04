@@ -163,10 +163,11 @@ const Index = () => {
     case 'super_admin':
       return <SuperAdminDashboard />;
     case 'dept_admin':
+      return <DeptAdminDashboard />;
     case 'hod':
     case 'lecturer':
     case 'course_rep':
-      return <DeptAdminDashboard />;
+      return <StaffDashboard />;
     case 'student':
     default:
       return <StudentDashboard />;
