@@ -18,6 +18,7 @@ import DashboardLayout from '@/components/DashboardLayout';
 import { SheetsActions } from '@/components/SheetsActions';
 import { SheetsSettingsDialog } from '@/components/SheetsSettingsDialog';
 import { ProgressSummary } from '@/components/ProgressSummary';
+import { StaffAssignments } from '@/components/StaffAssignments';
 import LoadingScreen from '@/components/LoadingScreen';
 import { QRCodeCanvas } from 'qrcode.react';
 import { LocationPicker } from '@/components/LocationPicker';
