@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import SuperAdminDashboard from './SuperAdminDashboard';
 import DeptAdminDashboard from './DeptAdminDashboard';
 import StudentDashboard from './StudentDashboard';
+import StaffDashboard from './StaffDashboard';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { ClipboardCheck, Download, Search, LogIn, Users, ShieldCheck, BarChart3, FileText, Smartphone, Zap } from 'lucide-react';
@@ -163,10 +164,11 @@ const Index = () => {
     case 'super_admin':
       return <SuperAdminDashboard />;
     case 'dept_admin':
+      return <DeptAdminDashboard />;
     case 'hod':
     case 'lecturer':
     case 'course_rep':
-      return <DeptAdminDashboard />;
+      return <StaffDashboard />;
     case 'student':
     default:
       return <StudentDashboard />;
