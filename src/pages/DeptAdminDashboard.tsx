@@ -18,7 +18,6 @@ import DashboardLayout from '@/components/DashboardLayout';
 import { SheetsActions } from '@/components/SheetsActions';
 import { SheetsSettingsDialog } from '@/components/SheetsSettingsDialog';
 import { ProgressSummary } from '@/components/ProgressSummary';
-import { StaffAssignments } from '@/components/StaffAssignments';
 import LoadingScreen from '@/components/LoadingScreen';
 import { QRCodeCanvas } from 'qrcode.react';
 import { LocationPicker } from '@/components/LocationPicker';
@@ -77,7 +76,7 @@ const DeptAdminDashboard = () => {
   const [grid, setGrid] = useState<Record<string, Record<string, 'P' | 'A' | ''>>>({});
   const [localAttendance, setLocalAttendance] = useState<LocalAttendance[]>([]);
   const [history, setHistory] = useState<AttendanceRecord[]>([]);
-  const [activeTab, setActiveTab] = useState<'mark' | 'history' | 'students' | 'staff' | 'logins'>('mark');
+  const [activeTab, setActiveTab] = useState<'mark' | 'history' | 'students' | 'logins'>('mark');
   const [loginEvents, setLoginEvents] = useState<Array<{ id: string; created_at: string; event: string; matric_no: string | null; student_id: string | null; detail: any }>>([]);
   const [loginEventsLoading, setLoginEventsLoading] = useState(false);
   const [loginEventFilter, setLoginEventFilter] = useState<'all' | 'success' | 'blocked_already_used' | 'reset'>('all');
@@ -1077,7 +1076,6 @@ const DeptAdminDashboard = () => {
     { id: 'mark' as const, label: 'Mark Attendance', icon: CalendarCheck },
     { id: 'students' as const, label: 'Students', icon: Users },
     { id: 'history' as const, label: 'History', icon: History },
-    { id: 'staff' as const, label: 'Staff & Reps', icon: BookOpen },
     { id: 'logins' as const, label: 'Login Log', icon: ShieldCheck },
   ];
 
@@ -1951,9 +1949,6 @@ const DeptAdminDashboard = () => {
             </CardContent>
           </Card>
         )}
-
-        {activeTab === 'staff' && <StaffAssignments courses={courses} />}
-
 
         {activeTab === 'logins' && (
           <Card>
