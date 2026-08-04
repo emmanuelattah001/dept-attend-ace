@@ -76,7 +76,7 @@ const DeptAdminDashboard = () => {
   const [grid, setGrid] = useState<Record<string, Record<string, 'P' | 'A' | ''>>>({});
   const [localAttendance, setLocalAttendance] = useState<LocalAttendance[]>([]);
   const [history, setHistory] = useState<AttendanceRecord[]>([]);
-  const [activeTab, setActiveTab] = useState<'mark' | 'history' | 'students' | 'logins'>('mark');
+  const [activeTab, setActiveTab] = useState<'mark' | 'history' | 'students' | 'staff' | 'logins'>('mark');
   const [loginEvents, setLoginEvents] = useState<Array<{ id: string; created_at: string; event: string; matric_no: string | null; student_id: string | null; detail: any }>>([]);
   const [loginEventsLoading, setLoginEventsLoading] = useState(false);
   const [loginEventFilter, setLoginEventFilter] = useState<'all' | 'success' | 'blocked_already_used' | 'reset'>('all');
