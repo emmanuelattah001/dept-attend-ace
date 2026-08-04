@@ -1951,6 +1951,9 @@ const DeptAdminDashboard = () => {
           </Card>
         )}
 
+        {activeTab === 'staff' && <StaffAssignments courses={courses} />}
+
+
         {activeTab === 'logins' && (
           <Card>
             <CardHeader>
