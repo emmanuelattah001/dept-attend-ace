@@ -1234,6 +1234,23 @@ const DeptAdminDashboard = () => {
     }
   };
 
+  const [resettingStudentId, setResettingStudentId] = useState<string | null>(null);
+  const resetSingleStudentLogin = async (studentId: string, studentName: string) => {
+    if (!confirm(`Reset one-time login lock for ${studentName}? They will be able to sign in again once.`)) return;
+    setResettingStudentId(studentId);
+    try {
+      const { data, error } = await supabase.functions.invoke('provision-student-auth', {
+        body: { action: 'reset_login', student_id: studentId },
+      });
+      if (error || (data as any)?.error) throw new Error((data as any)?.error || error?.message);
+      toast.success(`Login lock reset for ${studentName}.`);
+    } catch (e: any) {
+      toast.error(e.message ?? 'Failed to reset login');
+    } finally {
+      setResettingStudentId(null);
+    }
+  };
+
 
   if (initialLoading) {
     return <LoadingScreen message="Loading dashboard..." />;
@@ -1764,9 +1781,22 @@ const DeptAdminDashboard = () => {
                               <Input value={edits.matric_no ?? student.matric_no ?? ''} onChange={(e) => updateStudentField(student.id, 'matric_no', e.target.value)} placeholder="e.g., MAT/2024/001" className="min-w-[160px]" />
                             </TableCell>
                             <TableCell>
-                              <Button variant="ghost" size="icon" onClick={() => deleteStudent(student.id, student.name)} className="text-destructive hover:text-destructive">
-                                <Trash2 className="w-4 h-4" />
-                              </Button>
+                              <div className="flex items-center gap-1">
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  title="Reset one-time login lock"
+                                  onClick={() => resetSingleStudentLogin(student.id, student.name)}
+                                  disabled={resettingStudentId === student.id}
+                                >
+                                  {resettingStudentId === student.id
+                                    ? <Loader2 className="w-4 h-4 animate-spin" />
+                                    : <KeyRound className="w-4 h-4" />}
+                                </Button>
+                                <Button variant="ghost" size="icon" onClick={() => deleteStudent(student.id, student.name)} className="text-destructive hover:text-destructive">
+                                  <Trash2 className="w-4 h-4" />
+                                </Button>
+                              </div>
                             </TableCell>
                           </TableRow>
                         );
