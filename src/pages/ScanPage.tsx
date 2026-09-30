@@ -103,7 +103,10 @@ const ScanPage = () => {
       if (loc) { body.lat = loc.lat; body.lng = loc.lng; body.accuracy = loc.accuracy; }
       if (selfie) body.selfie = selfie;
 
-      const { data, error } = await supabase.functions.invoke('mark-via-qr', { body });
+      let { data, error } = await supabase.functions.invoke('mark-via-qr', { body });
+      if (error && !data) {
+        try { data = await (error as any)?.context?.json?.(); } catch { /* ignore */ }
+      }
       if (error || (data as any)?.error) {
         const msg = (data as any)?.error || error?.message || 'Failed to mark attendance';
         setResult({ ok: false, message: msg, score: (data as any)?.confidence_score, proofs: (data as any)?.proofs });
