@@ -10,36 +10,37 @@ import LoadingScreen from '@/components/LoadingScreen';
 
 const features = [
   {
-    icon: ShieldCheck,
-    title: 'Multi-Factor Presence Proof',
-    description: 'Every scan is verified by a rotating QR code, face match, GPS geofence and device fingerprint before it counts.',
-  },
-  {
-    icon: Zap,
-    title: 'Dynamic Rotating QR',
-    description: 'Session codes refresh every 30 seconds, so screenshots shared with absent friends simply stop working.',
-  },
-  {
     icon: Users,
-    title: 'Roles for Every Level',
-    description: 'Students, course reps, lecturers, HODs and school admins each get a dashboard scoped to what they own.',
+    title: 'Student Management',
+    description: 'Easily register and manage students across multiple departments with bulk import support.',
   },
   {
-    icon: BarChart3,
-    title: 'Confidence Scoring',
-    description: 'Each record carries a 0-100 verification score with the exact proofs behind it, ready for audit.',
-  },
-  {
-    icon: FileText,
-    title: 'PDF Reports & Sheets Archive',
-    description: 'Export branded attendance reports and keep a permanent Google Sheets archive of every record.',
+    icon: ClipboardCheck,
+    title: 'Quick Attendance Marking',
+    description: 'Mark attendance for entire classes in seconds with an intuitive checkbox interface.',
   },
   {
     icon: Search,
     title: 'Instant Lookup',
     description: 'Students can check their own attendance anytime using just their matric number — no login needed.',
   },
+  {
+    icon: BarChart3,
+    title: 'Real-time Statistics',
+    description: 'View attendance rates, present/absent counts, and trends at a glance from the dashboard.',
+  },
+  {
+    icon: FileText,
+    title: 'PDF Reports',
+    description: 'Generate and share professional attendance reports as branded PDF documents.',
+  },
+  {
+    icon: ShieldCheck,
+    title: 'Role-Based Access',
+    description: 'Department admins(course rep), and students each get tailored dashboards and permissions.',
+  },
 ];
+
 
 
 const LandingPage = () => {
@@ -53,15 +54,14 @@ const LandingPage = () => {
         <div className="container mx-auto px-4 py-20 sm:py-28 relative">
           <div className="max-w-2xl mx-auto text-center space-y-6">
             <div className="mx-auto w-16 h-16 bg-primary rounded-2xl flex items-center justify-center shadow-lg">
-              <ShieldCheck className="w-8 h-8 text-primary-foreground" />
+              <ClipboardCheck className="w-8 h-8 text-primary-foreground" />
             </div>
-            <p className="text-xs uppercase tracking-widest text-muted-foreground">Achievers University</p>
             <h1 className="text-4xl sm:text-5xl font-heading font-bold tracking-tight">
-              Intelligent Attendance &{' '}
-              <span className="text-primary">Presence Verification</span>
+              Smart Attendance,{' '}
+              <span className="text-primary">Made Simple</span>
             </h1>
             <p className="text-lg text-muted-foreground max-w-lg mx-auto">
-              AIPS proves who was actually in the room — rotating QR codes, face matching, GPS geofencing and device proof, combined into one confidence score.
+              AttendTrack helps institutions track, manage, and share student attendance effortlessly — from marking to PDF reports, all in one place.
             </p>
 
             <div className="flex flex-col sm:flex-row gap-3 justify-center pt-2">
@@ -69,9 +69,10 @@ const LandingPage = () => {
                 <Search className="w-5 h-5 mr-2" /> Check My Attendance
               </Button>
               <Button onClick={() => navigate('/login')} variant="outline" size="lg" className="text-base">
-                <LogIn className="w-5 h-5 mr-2" /> login
+                <LogIn className="w-5 h-5 mr-2" /> Course Rep's
               </Button>
             </div>
+
           </div>
         </div>
       </section>
