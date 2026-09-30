@@ -25,7 +25,7 @@ const DashboardLayout = ({ children }: { children: ReactNode }) => {
             <div className="w-9 h-9 bg-primary rounded-lg flex items-center justify-center">
               <ShieldCheck className="w-5 h-5 text-primary-foreground" />
             </div>
-            <h1 className="text-lg font-heading font-semibold">AIPS</h1>
+            <h1 className="text-lg font-heading font-semibold">AttendTrack</h1>
           </div>
 
           <div className="flex items-center gap-3">

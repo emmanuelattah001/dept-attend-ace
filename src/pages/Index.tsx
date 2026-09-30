@@ -109,7 +109,7 @@ const LandingPage = () => {
           </div>
           <div className="grid sm:grid-cols-3 gap-8 max-w-3xl mx-auto">
             {[
-              { step: '1', icon: Smartphone, title: 'Open the App', desc: 'Access AIPS from any device — mobile, tablet, or desktop.' },
+              { step: '1', icon: Smartphone, title: 'Open the App', desc: 'Access AttendTrack from any device — mobile, tablet, or desktop.' },
               { step: '2', icon: ClipboardCheck, title: 'Mark Attendance', desc: 'Admins select a date, pick students, and mark present or absent.' },
               { step: '3', icon: Zap, title: 'View & Share', desc: 'Students check records instantly. Admins export branded PDF reports.' },
             ].map((s) => (
@@ -144,7 +144,7 @@ const LandingPage = () => {
       {/* Footer */}
       <footer className="border-t py-6">
         <div className="container mx-auto px-4 text-center text-sm text-muted-foreground">
-          © {new Date().getFullYear()} AIPS · Achievers University. Verified presence, not just signatures.
+          © {new Date().getFullYear()} AttendTrack. Built for smarter attendance management.
         </div>
       </footer>
     </div>
