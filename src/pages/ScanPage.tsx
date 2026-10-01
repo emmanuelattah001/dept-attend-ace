@@ -7,7 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { toast } from 'sonner';
-import { CheckCircle2, XCircle, ArrowLeft, Camera, Loader2, ShieldCheck, MapPin, ScanFace, Smartphone } from 'lucide-react';
+import { CheckCircle2, XCircle, ArrowLeft, Camera, Loader2, ShieldCheck, MapPin, ScanFace, Smartphone, RefreshCw, Check } from 'lucide-react';
 
 const DEVICE_KEY = 'aips_device_id';
 
@@ -19,6 +19,8 @@ function getDeviceId(): string {
   }
   return id;
 }
+
+type FaceStep = 'idle' | 'camera' | 'preview';
 
 const ScanPage = () => {
   const navigate = useNavigate();
@@ -32,6 +34,11 @@ const ScanPage = () => {
   const [submitting, setSubmitting] = useState(false);
   const scannerRef = useRef<Html5Qrcode | null>(null);
   const submittedRef = useRef(false);
+
+  // Guided selfie state
+  const [faceStep, setFaceStep] = useState<FaceStep>('idle');
+  const [selfiePreview, setSelfiePreview] = useState<string | null>(null);
+  const pendingRef = useRef<{ token: string; code?: string } | null>(null);
   const selfieVideoRef = useRef<HTMLVideoElement | null>(null);
   const selfieStreamRef = useRef<MediaStream | null>(null);
 
@@ -48,6 +55,11 @@ const ScanPage = () => {
       .then(({ data }) => setNeedsFace(Boolean((data as any)?.face_url)));
   }, [user]);
 
+  const stopSelfieCamera = () => {
+    selfieStreamRef.current?.getTracks().forEach(t => t.stop());
+    selfieStreamRef.current = null;
+  };
+
   const getLocation = () => new Promise<{ lat: number; lng: number; accuracy: number } | null>((resolve) => {
     if (!navigator.geolocation) return resolve(null);
     navigator.geolocation.getCurrentPosition(
@@ -57,47 +69,68 @@ const ScanPage = () => {
     );
   });
 
-  const captureSelfie = async (): Promise<string | null> => {
+  // ---- Guided selfie flow ----
+  const startSelfieCamera = async () => {
+    setSelfiePreview(null);
+    setFaceStep('camera');
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } });
       selfieStreamRef.current = stream;
-      const video = selfieVideoRef.current ?? document.createElement('video');
-      video.srcObject = stream;
-      video.muted = true;
-      video.playsInline = true;
-      await video.play();
-      await new Promise(r => setTimeout(r, 700)); // let exposure settle
-      const canvas = document.createElement('canvas');
-      const size = 480;
-      canvas.width = size; canvas.height = size;
-      const ctx = canvas.getContext('2d');
-      if (!ctx) return null;
-      const side = Math.min(video.videoWidth, video.videoHeight);
-      ctx.drawImage(video, (video.videoWidth - side) / 2, (video.videoHeight - side) / 2, side, side, 0, 0, size, size);
-      return canvas.toDataURL('image/jpeg', 0.85);
-    } catch {
-      return null;
-    } finally {
-      selfieStreamRef.current?.getTracks().forEach(t => t.stop());
-      selfieStreamRef.current = null;
+      // Wait a tick so the <video> element is mounted
+      await new Promise(r => setTimeout(r, 50));
+      if (selfieVideoRef.current) {
+        selfieVideoRef.current.srcObject = stream;
+        await selfieVideoRef.current.play();
+      }
+    } catch (e: any) {
+      setFaceStep('idle');
+      pendingRef.current = null;
+      submittedRef.current = false;
+      setResult({ ok: false, message: 'Face check required — allow camera access and try again.' });
+      toast.error('Camera access required for face verification');
     }
   };
 
-  const submitToken = async (token: string, code?: string) => {
+  const captureSelfieFrame = () => {
+    const video = selfieVideoRef.current;
+    if (!video || !video.videoWidth) return;
+    const canvas = document.createElement('canvas');
+    const size = 480;
+    canvas.width = size; canvas.height = size;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    const side = Math.min(video.videoWidth, video.videoHeight);
+    ctx.drawImage(video, (video.videoWidth - side) / 2, (video.videoHeight - side) / 2, side, side, 0, 0, size, size);
+    setSelfiePreview(canvas.toDataURL('image/jpeg', 0.85));
+    stopSelfieCamera();
+    setFaceStep('preview');
+  };
+
+  const cancelSelfie = () => {
+    stopSelfieCamera();
+    setSelfiePreview(null);
+    setFaceStep('idle');
+    pendingRef.current = null;
+    submittedRef.current = false;
+  };
+
+  // ---- Submission ----
+  const submitToken = async (token: string, code?: string, selfie?: string | null) => {
     if (submittedRef.current) return;
     submittedRef.current = true;
+    setResult(null);
+
+    // If face verification is needed and we don't have a confirmed selfie yet,
+    // park the token and open the guided selfie screen first.
+    if (needsFace && !selfie) {
+      pendingRef.current = { token, code };
+      await startSelfieCamera();
+      return;
+    }
+
     setSubmitting(true);
     try {
-      const [loc, selfie] = await Promise.all([
-        getLocation(),
-        needsFace ? captureSelfie() : Promise.resolve(null),
-      ]);
-      if (needsFace && !selfie) {
-        setResult({ ok: false, message: 'Face check required — allow camera access and try again.' });
-        toast.error('Camera access required for face verification');
-        submittedRef.current = false;
-        return;
-      }
+      const loc = await getLocation();
       const body: any = { token, device_id: getDeviceId() };
       if (code) body.code = code.trim().toUpperCase();
       if (loc) { body.lat = loc.lat; body.lng = loc.lng; body.accuracy = loc.accuracy; }
@@ -124,7 +157,17 @@ const ScanPage = () => {
       }
     } finally {
       setSubmitting(false);
+      setFaceStep('idle');
+      setSelfiePreview(null);
+      pendingRef.current = null;
     }
+  };
+
+  const confirmSelfieAndSubmit = async () => {
+    const pending = pendingRef.current;
+    if (!pending || !selfiePreview) return;
+    submittedRef.current = false; // allow the real submit to proceed
+    await submitToken(pending.token, pending.code, selfiePreview);
   };
 
   const parseScan = (decoded: string): { token: string; code?: string } => {
@@ -169,12 +212,69 @@ const ScanPage = () => {
 
   useEffect(() => () => {
     scannerRef.current?.stop().catch(() => {});
-    selfieStreamRef.current?.getTracks().forEach(t => t.stop());
+    stopSelfieCamera();
   }, []);
 
   if (loading) return null;
 
   const proofs = result?.proofs ?? {};
+
+  // ---- Guided selfie screen ----
+  if (faceStep !== 'idle') {
+    return (
+      <div className="min-h-screen bg-background p-4">
+        <div className="max-w-md mx-auto space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-lg flex items-center gap-2">
+                <ScanFace className="w-5 h-5 text-primary" /> Face Verification
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <p className="text-sm text-muted-foreground">
+                {faceStep === 'camera'
+                  ? 'Center your face inside the oval, make sure you are in good light, then tap Capture.'
+                  : 'Check your photo — make sure your face is clear and well lit, then confirm.'}
+              </p>
+
+              <div className="relative mx-auto w-64 h-64 rounded-2xl overflow-hidden border bg-muted">
+                {faceStep === 'camera' ? (
+                  <>
+                    <video ref={selfieVideoRef} playsInline muted className="w-full h-full object-cover" />
+                    {/* Face oval guide */}
+                    <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
+                      <div className="w-40 h-52 rounded-[50%] border-2 border-primary/80 border-dashed" />
+                    </div>
+                  </>
+                ) : (
+                  selfiePreview && <img src={selfiePreview} alt="Your captured selfie" className="w-full h-full object-cover" />
+                )}
+              </div>
+
+              <div className="flex flex-col gap-2">
+                {faceStep === 'camera' ? (
+                  <Button onClick={captureSelfieFrame} className="w-full">
+                    <Camera className="w-4 h-4 mr-2" /> Capture
+                  </Button>
+                ) : (
+                  <>
+                    <Button onClick={confirmSelfieAndSubmit} className="w-full" disabled={submitting}>
+                      {submitting ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Check className="w-4 h-4 mr-2" />}
+                      {submitting ? 'Verifying...' : 'Confirm & mark attendance'}
+                    </Button>
+                    <Button variant="outline" onClick={startSelfieCamera} disabled={submitting}>
+                      <RefreshCw className="w-4 h-4 mr-2" /> Retake
+                    </Button>
+                  </>
+                )}
+                <Button variant="ghost" onClick={cancelSelfie} disabled={submitting}>Cancel</Button>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-background p-4">
@@ -210,7 +310,6 @@ const ScanPage = () => {
             )}
 
             <div id="qr-reader" className={`w-full ${scanning ? '' : 'hidden'}`} />
-            <video ref={selfieVideoRef} className="hidden" playsInline muted />
 
             {!scanning && (
               <Button onClick={startCamera} className="w-full" disabled={submitting}>
