@@ -7,6 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { toast } from 'sonner';
+import { Geolocation } from '@capacitor/geolocation';
 import { CheckCircle2, XCircle, ArrowLeft, Camera, Loader2, ShieldCheck, MapPin, ScanFace, Smartphone } from 'lucide-react';
 
 const DEVICE_KEY = 'aips_device_id';
@@ -48,14 +49,37 @@ const ScanPage = () => {
       .then(({ data }) => setNeedsFace(Boolean((data as any)?.face_url)));
   }, [user]);
 
-  const getLocation = () => new Promise<{ lat: number; lng: number; accuracy: number } | null>((resolve) => {
-    if (!navigator.geolocation) return resolve(null);
-    navigator.geolocation.getCurrentPosition(
-      (pos) => resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude, accuracy: pos.coords.accuracy }),
-      () => resolve(null),
-      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
-    );
-  });
+  const getLocation = async (): Promise<{ lat: number; lng: number; accuracy: number } | null> => {
+  try {
+    // 1. Audit native device configuration state permissions
+    let check = await Geolocation.checkPermissions();
+    
+    if (check.location === 'prompt' || check.location === 'denied') {
+      const request = await Geolocation.requestPermissions();
+      if (request.location !== 'granted') {
+        toast.error("Location tracking authorization is required to verify classroom attendance.");
+        return null;
+      }
+    }
+
+    // 2. Fetch native coordinates directly via phone hardware sensors
+    const position = await Geolocation.getCurrentPosition({
+      enableHighAccuracy: true,
+      timeout: 15000,
+      maximumAge: 0
+    });
+
+    return {
+      lat: position.coords.latitude,
+      lng: position.coords.longitude,
+      accuracy: position.coords.accuracy
+    };
+  } catch (error) {
+    console.error('Native hardware location reading failed:', error);
+    toast.error("Failed to read device GPS coordinates. Ensure location features are switched ON.");
+    return null;
+  }
+};
 
   const captureSelfie = async (): Promise<string | null> => {
     try {

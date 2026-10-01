@@ -1,29 +1,68 @@
-import { useState, useEffect, useRef, useMemo } from 'react';
-import { supabase } from '@/integrations/supabase/client';
-import { useAuth } from '@/hooks/useAuth';
-import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Input } from '@/components/ui/input';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
-import { Badge } from '@/components/ui/badge';
-import { toast } from 'sonner';
-import { 
-  CalendarCheck, Download, History, Users, Plus, Upload, Save, Trash2, 
-  Check, X, CheckCheck, XCircle, Search, Database, BookOpen, AlertCircle, 
-  RefreshCw, WifiOff, Loader2, QrCode, KeyRound, Copy, ShieldCheck
-} from 'lucide-react';
-import DashboardLayout from '@/components/DashboardLayout';
-import { SheetsActions } from '@/components/SheetsActions';
-import { SheetsSettingsDialog } from '@/components/SheetsSettingsDialog';
-import { ProgressSummary } from '@/components/ProgressSummary';
-import LoadingScreen from '@/components/LoadingScreen';
-import { QRCodeCanvas } from 'qrcode.react';
-import { LocationPicker } from '@/components/LocationPicker';
+import { useState, useEffect, useRef, useMemo } from "react";
+import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/hooks/useAuth";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
+import { Badge } from "@/components/ui/badge";
+import { toast } from "sonner";
+import {
+  CalendarCheck,
+  Download,
+  History,
+  Users,
+  Plus,
+  Upload,
+  Save,
+  Trash2,
+  Check,
+  X,
+  CheckCheck,
+  XCircle,
+  Search,
+  Database,
+  BookOpen,
+  AlertCircle,
+  RefreshCw,
+  WifiOff,
+  Loader2,
+  QrCode,
+  KeyRound,
+  Copy,
+  ShieldCheck,
+} from "lucide-react";
+import DashboardLayout from "@/components/DashboardLayout";
+import { SheetsActions } from "@/components/SheetsActions";
+import { SheetsSettingsDialog } from "@/components/SheetsSettingsDialog";
+import { ProgressSummary } from "@/components/ProgressSummary";
+import LoadingScreen from "@/components/LoadingScreen";
+import { QRCodeCanvas } from "qrcode.react";
+import { LocationPicker } from "@/components/LocationPicker";
 import * as XLSX from "xlsx";
-import jsPDF from 'jspdf';
-import autoTable from 'jspdf-autotable';
+import jsPDF from "jspdf";
+import autoTable from "jspdf-autotable";
 
 interface Student {
   id: string;
@@ -61,7 +100,7 @@ interface LocalAttendance {
   studentId: string;
   courseId: string;
   date: string;
-  status: 'P' | 'A';
+  status: "P" | "A";
   synced: boolean;
   error?: string;
 }
@@ -69,31 +108,63 @@ interface LocalAttendance {
 const DeptAdminDashboard = () => {
   const { profile, user } = useAuth();
   const [students, setStudents] = useState<Student[]>([]);
-  const [departmentName, setDepartmentName] = useState<string>('');
+  const [departmentName, setDepartmentName] = useState<string>("");
   const [courses, setCourses] = useState<Course[]>([]);
-  const [selectedCourse, setSelectedCourse] = useState<string>('');
-  const [dateColumns, setDateColumns] = useState<string[]>([new Date().toISOString().split('T')[0]]);
-  const [grid, setGrid] = useState<Record<string, Record<string, 'P' | 'A' | ''>>>({});
+  const [selectedCourse, setSelectedCourse] = useState<string>("");
+  const [dateColumns, setDateColumns] = useState<string[]>([
+    new Date().toISOString().split("T")[0],
+  ]);
+  const [grid, setGrid] = useState<
+    Record<string, Record<string, "P" | "A" | "">>
+  >({});
   const [localAttendance, setLocalAttendance] = useState<LocalAttendance[]>([]);
   const [history, setHistory] = useState<AttendanceRecord[]>([]);
-  const [activeTab, setActiveTab] = useState<'mark' | 'history' | 'students' | 'logins'>('mark');
-  const [loginEvents, setLoginEvents] = useState<Array<{ id: string; created_at: string; event: string; matric_no: string | null; student_id: string | null; detail: any }>>([]);
+  const [activeTab, setActiveTab] = useState<
+    "mark" | "history" | "students" | "logins"
+  >("mark");
+  const [loginEvents, setLoginEvents] = useState<
+    Array<{
+      id: string;
+      created_at: string;
+      event: string;
+      matric_no: string | null;
+      student_id: string | null;
+      detail: any;
+    }>
+  >([]);
   const [loginEventsLoading, setLoginEventsLoading] = useState(false);
-  const [loginEventFilter, setLoginEventFilter] = useState<'all' | 'success' | 'blocked_already_used' | 'reset'>('all');
-  const [loginEventSearch, setLoginEventSearch] = useState('');
-  const [historySource, setHistorySource] = useState<'local' | 'sheet'>('sheet');
+  const [loginEventFilter, setLoginEventFilter] = useState<
+    "all" | "success" | "blocked_already_used" | "reset"
+  >("all");
+  const [loginEventSearch, setLoginEventSearch] = useState("");
+  const [historySource, setHistorySource] = useState<"local" | "sheet">(
+    "local",
+  );
   const [sheetHistory, setSheetHistory] = useState<AttendanceRecord[]>([]);
   const [sheetHistoryLoading, setSheetHistoryLoading] = useState(false);
   const [sheetUrl, setSheetUrl] = useState<string | null>(null);
-  const [studentEdits, setStudentEdits] = useState<Record<string, Partial<Student>>>({});
+  const [studentEdits, setStudentEdits] = useState<
+    Record<string, Partial<Student>>
+  >({});
   const [savingStudents, setSavingStudents] = useState(false);
   const [syncingAttendance, setSyncingAttendance] = useState(false);
-  const [sheetsBusy, setSheetsBusy] = useState<false | 'sync' | 'export'>(false);
-  const [connectionStatus, setConnectionStatus] = useState<'online' | 'offline' | 'checking'>('checking');
+  const [sheetsBusy, setSheetsBusy] = useState<false | "sync" | "export">(
+    false,
+  );
+  const [connectionStatus, setConnectionStatus] = useState<
+    "online" | "offline" | "checking"
+  >("checking");
   const [showQrDialog, setShowQrDialog] = useState(false);
-  const [qrSession, setQrSession] = useState<{ token: string; expires_at: string; course_id: string; date: string } | null>(null);
-  const [qrCourseId, setQrCourseId] = useState<string>('');
-  const [qrDate, setQrDate] = useState<string>(new Date().toISOString().split('T')[0]);
+  const [qrSession, setQrSession] = useState<{
+    token: string;
+    expires_at: string;
+    course_id: string;
+    date: string;
+  } | null>(null);
+  const [qrCourseId, setQrCourseId] = useState<string>("");
+  const [qrDate, setQrDate] = useState<string>(
+    new Date().toISOString().split("T")[0],
+  );
   const [qrDurationMin, setQrDurationMin] = useState<number>(15);
   const [qrCreating, setQrCreating] = useState(false);
   const [qrLat, setQrLat] = useState<number | null>(null);
@@ -104,53 +175,67 @@ const DeptAdminDashboard = () => {
   const [now, setNow] = useState(Date.now());
   const [rotatingCode, setRotatingCode] = useState<string | null>(null);
   useEffect(() => {
-    if (!qrSession) { setRotatingCode(null); return; }
+    if (!qrSession) {
+      setRotatingCode(null);
+      return;
+    }
     const id = setInterval(() => setNow(Date.now()), 1000);
     let cancelled = false;
     const pull = async () => {
-      const { data } = await supabase.functions.invoke('session-token', { body: { token: qrSession.token } });
-      if (!cancelled && (data as any)?.code) setRotatingCode((data as any).code);
+      const { data } = await supabase.functions.invoke("session-token", {
+        body: { token: qrSession.token },
+      });
+      if (!cancelled && (data as any)?.code)
+        setRotatingCode((data as any).code);
     };
     pull();
     const poll = setInterval(pull, 10_000);
-    return () => { cancelled = true; clearInterval(id); clearInterval(poll); };
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+      clearInterval(poll);
+    };
   }, [qrSession]);
 
-
-
   const [showAddDialog, setShowAddDialog] = useState(false);
-  const [newStudent, setNewStudent] = useState({ name: '', gender: '', matric_no: '' });
+  const [newStudent, setNewStudent] = useState({
+    name: "",
+    gender: "",
+    matric_no: "",
+  });
   const [addingStudent, setAddingStudent] = useState(false);
 
   const [showCourseDialog, setShowCourseDialog] = useState(false);
-  const [newCourse, setNewCourse] = useState({ name: '', code: '' });
+  const [newCourse, setNewCourse] = useState({ name: "", code: "" });
   const [addingCourse, setAddingCourse] = useState(false);
 
   const [showShareDialog, setShowShareDialog] = useState(false);
-  const [shareFileName, setShareFileName] = useState('');
-  const [shareMessage, setShareMessage] = useState('');
+  const [shareFileName, setShareFileName] = useState("");
+  const [shareMessage, setShareMessage] = useState("");
   const pdfBlobRef = useRef<Blob | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [importing, setImporting] = useState(false);
   const [initialLoading, setInitialLoading] = useState(true);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [historyCourseFilter, setHistoryCourseFilter] = useState<string>('all');
-  const [filterPercent, setFilterPercent] = useState<string>('all');
+  const [searchQuery, setSearchQuery] = useState("");
+  const [historyCourseFilter, setHistoryCourseFilter] = useState<string>("all");
+  const [filterPercent, setFilterPercent] = useState<string>("all");
   const [deletingHistory, setDeletingHistory] = useState(false);
 
   // Check connection status
   useEffect(() => {
     const checkConnection = async () => {
-      setConnectionStatus('checking');
+      setConnectionStatus("checking");
       try {
-        const { error } = await supabase.from('attendance').select('count', { count: 'exact', head: true });
-        setConnectionStatus(error ? 'offline' : 'online');
+        const { error } = await supabase
+          .from("attendance")
+          .select("count", { count: "exact", head: true });
+        setConnectionStatus(error ? "offline" : "online");
       } catch {
-        setConnectionStatus('offline');
+        setConnectionStatus("offline");
       }
     };
-    
+
     checkConnection();
     const interval = setInterval(checkConnection, 30000);
     return () => clearInterval(interval);
@@ -181,11 +266,11 @@ const DeptAdminDashboard = () => {
         fetchHistory(),
         fetchDepartmentName(),
         fetchCourses(),
-        loadLocalAttendance()
+        loadLocalAttendance(),
       ]);
     } catch (error) {
-      console.error('Error initializing dashboard:', error);
-      toast.error('Failed to load dashboard data. Please refresh the page.');
+      console.error("Error initializing dashboard:", error);
+      toast.error("Failed to load dashboard data. Please refresh the page.");
     } finally {
       setInitialLoading(false);
     }
@@ -197,72 +282,80 @@ const DeptAdminDashboard = () => {
       try {
         const parsed = JSON.parse(saved);
         setLocalAttendance(parsed);
-        
-        const localGrid: Record<string, Record<string, 'P' | 'A' | ''>> = {};
+
+        const localGrid: Record<string, Record<string, "P" | "A" | "">> = {};
         parsed.forEach((item: LocalAttendance) => {
           if (!localGrid[item.studentId]) localGrid[item.studentId] = {};
           localGrid[item.studentId][item.date] = item.status;
         });
-        
-        setGrid(prev => {
+
+        setGrid((prev) => {
           const merged = { ...prev };
-          Object.keys(localGrid).forEach(studentId => {
-            merged[studentId] = { ...merged[studentId], ...localGrid[studentId] };
+          Object.keys(localGrid).forEach((studentId) => {
+            merged[studentId] = {
+              ...merged[studentId],
+              ...localGrid[studentId],
+            };
           });
           return merged;
         });
-        
-        const pendingCount = parsed.filter((item: LocalAttendance) => !item.synced).length;
+
+        const pendingCount = parsed.filter(
+          (item: LocalAttendance) => !item.synced,
+        ).length;
         if (pendingCount > 0) {
           toast.info(`${pendingCount} unsynced attendance records found`);
         }
       } catch (e) {
-        console.error('Failed to load local attendance:', e);
-        toast.error('Failed to load saved attendance data');
+        console.error("Failed to load local attendance:", e);
+        toast.error("Failed to load saved attendance data");
       }
     }
   };
 
   const saveLocalAttendance = () => {
     try {
-      localStorage.setItem(`attendance_${profile?.department_id}`, JSON.stringify(localAttendance));
+      localStorage.setItem(
+        `attendance_${profile?.department_id}`,
+        JSON.stringify(localAttendance),
+      );
     } catch (e) {
-      console.error('Failed to save local attendance:', e);
+      console.error("Failed to save local attendance:", e);
     }
   };
 
   const clearLocalAttendance = () => {
     localStorage.removeItem(`attendance_${profile?.department_id}`);
     setLocalAttendance([]);
-    toast.success('Local attendance data cleared');
+    toast.success("Local attendance data cleared");
   };
 
   const fetchDepartmentName = async () => {
     try {
       const { data, error } = await supabase
-        .from('departments')
-        .select('name')
-        .eq('id', profile!.department_id!)
+        .from("departments")
+        .select("name")
+        .eq("id", profile!.department_id!)
         .single();
-      
+
       if (error) throw error;
       if (data) setDepartmentName(data.name);
     } catch (error) {
-      console.error('Error fetching department:', error);
-      setDepartmentName('Unknown Department');
+      console.error("Error fetching department:", error);
+      setDepartmentName("Unknown Department");
     }
   };
 
   const fetchCourses = async () => {
     try {
       const { data, error } = await (supabase as any)
-        .from('courses')
-        .select('*')
-        .eq('department_id', profile!.department_id!)
-        .order('name');
-      
+        .from("courses")
+        .select("*")
+        .eq("department_id", profile!.department_id!)
+        .order("name");
+
       if (error) throw error;
-      
+
       if (data && data.length > 0) {
         setCourses(data as Course[]);
         if (!selectedCourse) {
@@ -270,24 +363,24 @@ const DeptAdminDashboard = () => {
         }
       } else {
         const { data: newCourse, error: createError } = await (supabase as any)
-          .from('courses')
+          .from("courses")
           .insert({
-            name: 'General Attendance',
-            code: 'GEN001',
-            department_id: profile!.department_id
+            name: "General Attendance",
+            code: "GEN001",
+            department_id: profile!.department_id,
           })
           .select()
           .single();
-        
+
         if (createError) throw createError;
         if (newCourse) {
           setCourses([newCourse]);
           setSelectedCourse(newCourse.id);
-          toast.success('Created default course');
+          toast.success("Created default course");
         }
       }
     } catch (error: any) {
-      console.error('Error fetching courses:', error);
+      console.error("Error fetching courses:", error);
       toast.error(`Failed to load courses: ${error.message}`);
     }
   };
@@ -295,15 +388,15 @@ const DeptAdminDashboard = () => {
   const fetchStudents = async () => {
     try {
       const { data, error } = await (supabase as any)
-        .from('students')
-        .select('id, name, gender, matric_no, department_id')
-        .eq('department_id', profile!.department_id!)
-        .order('name');
-      
+        .from("students")
+        .select("id, name, gender, matric_no, department_id")
+        .eq("department_id", profile!.department_id!)
+        .order("name");
+
       if (error) throw error;
       if (data) setStudents(data as Student[]);
     } catch (error: any) {
-      console.error('Error fetching students:', error);
+      console.error("Error fetching students:", error);
       toast.error(`Failed to load students: ${error.message}`);
     }
   };
@@ -317,8 +410,9 @@ const DeptAdminDashboard = () => {
 
       while (hasMore) {
         const { data, error } = await (supabase as any)
-          .from('attendance')
-          .select(`
+          .from("attendance")
+          .select(
+            `
               id,
               student_ref,
               course_id,
@@ -333,9 +427,10 @@ const DeptAdminDashboard = () => {
                 name,
                 code
               )
-            `)
-          .eq('department_id', profile!.department_id!)
-          .order('date', { ascending: false })
+            `,
+          )
+          .eq("department_id", profile!.department_id!)
+          .order("date", { ascending: false })
           .range(from, from + pageSize - 1);
 
         if (error) throw error;
@@ -351,21 +446,24 @@ const DeptAdminDashboard = () => {
 
       setHistory(allData);
     } catch (error: any) {
-      console.error('Error fetching history:', error);
+      console.error("Error fetching history:", error);
       toast.error(`Failed to load history: ${error.message}`);
     }
   };
 
   const fetchAttendanceGrid = async () => {
     if (!profile?.department_id) return;
-    if (!selectedCourse) { setGrid({}); return; }
+    if (!selectedCourse) {
+      setGrid({});
+      return;
+    }
 
     try {
       const { data, error } = await supabase
-        .from('attendance')
-        .select('student_ref, date, status, course_id')
-        .eq('department_id', profile.department_id)
-        .eq('course_id', selectedCourse);
+        .from("attendance")
+        .select("student_ref, date, status, course_id")
+        .eq("department_id", profile.department_id)
+        .eq("course_id", selectedCourse);
 
       if (error) throw error;
 
@@ -373,34 +471,35 @@ const DeptAdminDashboard = () => {
 
       const newGrid: any = {};
       data.forEach((r: any) => {
-        const val = r.status === 'present' ? 'P' : 'A';
+        const val = r.status === "present" ? "P" : "A";
         if (!newGrid[r.student_ref]) newGrid[r.student_ref] = {};
         newGrid[r.student_ref][r.date] = val;
       });
 
-      const unsynced = localAttendance.filter(item => !item.synced && item.courseId === selectedCourse);
-      unsynced.forEach(item => {
+      const unsynced = localAttendance.filter(
+        (item) => !item.synced && item.courseId === selectedCourse,
+      );
+      unsynced.forEach((item) => {
         if (!newGrid[item.studentId]) newGrid[item.studentId] = {};
         newGrid[item.studentId][item.date] = item.status;
       });
 
       setGrid(newGrid);
     } catch (error: any) {
-      console.error('Error fetching attendance grid:', error);
+      console.error("Error fetching attendance grid:", error);
     }
   };
 
-
   const addCourse = async () => {
     if (!newCourse.name.trim() || !newCourse.code.trim()) {
-      toast.error('Course name and code are required');
+      toast.error("Course name and code are required");
       return;
     }
     if (!profile?.department_id) return;
     setAddingCourse(true);
 
     try {
-      const { error } = await (supabase as any).from('courses').insert({
+      const { error } = await (supabase as any).from("courses").insert({
         name: newCourse.name.trim(),
         code: newCourse.code.trim().toUpperCase(),
         department_id: profile.department_id,
@@ -408,12 +507,12 @@ const DeptAdminDashboard = () => {
 
       if (error) throw error;
 
-      toast.success('Course added successfully');
-      setNewCourse({ name: '', code: '' });
+      toast.success("Course added successfully");
+      setNewCourse({ name: "", code: "" });
       setShowCourseDialog(false);
       await fetchCourses();
     } catch (error: any) {
-      console.error('Error adding course:', error);
+      console.error("Error adding course:", error);
       toast.error(`Failed to add course: ${error.message}`);
     } finally {
       setAddingCourse(false);
@@ -421,27 +520,27 @@ const DeptAdminDashboard = () => {
   };
 
   const addDateColumn = () => {
-    const newDate = new Date().toISOString().split('T')[0];
+    const newDate = new Date().toISOString().split("T")[0];
     if (!dateColumns.includes(newDate)) {
-      setDateColumns(prev => [...prev, newDate]);
+      setDateColumns((prev) => [...prev, newDate]);
     } else {
       let d = new Date();
-      while (dateColumns.includes(d.toISOString().split('T')[0])) {
+      while (dateColumns.includes(d.toISOString().split("T")[0])) {
         d.setDate(d.getDate() + 1);
       }
-      setDateColumns(prev => [...prev, d.toISOString().split('T')[0]]);
+      setDateColumns((prev) => [...prev, d.toISOString().split("T")[0]]);
     }
   };
 
   const updateDateColumn = (index: number, value: string) => {
-    setDateColumns(prev => prev.map((d, i) => i === index ? value : d));
+    setDateColumns((prev) => prev.map((d, i) => (i === index ? value : d)));
   };
 
   const removeDateColumn = (index: number) => {
     if (dateColumns.length <= 1) return;
     const dateToRemove = dateColumns[index];
-    setDateColumns(prev => prev.filter((_, i) => i !== index));
-    setGrid(prev => {
+    setDateColumns((prev) => prev.filter((_, i) => i !== index));
+    setGrid((prev) => {
       const next = { ...prev };
       for (const sid of Object.keys(next)) {
         const { [dateToRemove]: _, ...rest } = next[sid];
@@ -449,36 +548,53 @@ const DeptAdminDashboard = () => {
       }
       return next;
     });
-    setLocalAttendance(prev => prev.filter(item => item.date !== dateToRemove));
+    setLocalAttendance((prev) =>
+      prev.filter((item) => item.date !== dateToRemove),
+    );
   };
 
   const toggleCell = (studentId: string, date: string) => {
-    setGrid(prev => {
-      const current = prev[studentId]?.[date] || '';
-      const nextStatus = current === '' ? 'P' : current === 'P' ? 'A' : '';
-      
-      setLocalAttendance(prevLocal => {
-        const existing = prevLocal.find(item => 
-          item.studentId === studentId && item.date === date
+    setGrid((prev) => {
+      const current = prev[studentId]?.[date] || "";
+      const nextStatus = current === "" ? "P" : current === "P" ? "A" : "";
+
+      setLocalAttendance((prevLocal) => {
+        const existing = prevLocal.find(
+          (item) => item.studentId === studentId && item.date === date,
         );
         if (existing) {
-          if (nextStatus === '') {
-            return prevLocal.filter(item => 
-              !(item.studentId === studentId && item.date === date)
+          if (nextStatus === "") {
+            return prevLocal.filter(
+              (item) => !(item.studentId === studentId && item.date === date),
             );
           } else {
-            return prevLocal.map(item => 
+            return prevLocal.map((item) =>
               item.studentId === studentId && item.date === date
-                ? { ...item, status: nextStatus, synced: false, error: undefined, courseId: selectedCourse }
-                : item
+                ? {
+                    ...item,
+                    status: nextStatus,
+                    synced: false,
+                    error: undefined,
+                    courseId: selectedCourse,
+                  }
+                : item,
             );
           }
-        } else if (nextStatus !== '') {
-          return [...prevLocal, { studentId, courseId: selectedCourse, date, status: nextStatus, synced: false }];
+        } else if (nextStatus !== "") {
+          return [
+            ...prevLocal,
+            {
+              studentId,
+              courseId: selectedCourse,
+              date,
+              status: nextStatus,
+              synced: false,
+            },
+          ];
         }
         return prevLocal;
       });
-      
+
       return {
         ...prev,
         [studentId]: { ...prev[studentId], [date]: nextStatus },
@@ -486,8 +602,8 @@ const DeptAdminDashboard = () => {
     });
   };
 
-  const markAllForDate = (date: string, status: 'P' | 'A') => {
-    setGrid(prev => {
+  const markAllForDate = (date: string, status: "P" | "A") => {
+    setGrid((prev) => {
       const next = { ...prev };
       for (const student of students) {
         if (next[student.id]) {
@@ -495,79 +611,98 @@ const DeptAdminDashboard = () => {
         } else {
           next[student.id] = { [date]: status };
         }
-        
-        setLocalAttendance(prevLocal => {
-          const existing = prevLocal.find(item => 
-            item.studentId === student.id && item.date === date
+
+        setLocalAttendance((prevLocal) => {
+          const existing = prevLocal.find(
+            (item) => item.studentId === student.id && item.date === date,
           );
           if (existing) {
-            return prevLocal.map(item => 
+            return prevLocal.map((item) =>
               item.studentId === student.id && item.date === date
-                ? { ...item, status, synced: false, error: undefined, courseId: selectedCourse }
-                : item
+                ? {
+                    ...item,
+                    status,
+                    synced: false,
+                    error: undefined,
+                    courseId: selectedCourse,
+                  }
+                : item,
             );
           } else {
-            return [...prevLocal, { studentId: student.id, courseId: selectedCourse, date, status, synced: false }];
+            return [
+              ...prevLocal,
+              {
+                studentId: student.id,
+                courseId: selectedCourse,
+                date,
+                status,
+                synced: false,
+              },
+            ];
           }
         });
       }
       return next;
     });
-    
-    toast.info(`Marked all students as ${status === 'P' ? 'Present' : 'Absent'} for ${date}`);
+
+    toast.info(
+      `Marked all students as ${status === "P" ? "Present" : "Absent"} for ${date}`,
+    );
   };
 
   const syncAttendanceToDatabase = async () => {
-    if (connectionStatus === 'offline') {
-      toast.error('You are offline. Please check your internet connection and try again.');
+    if (connectionStatus === "offline") {
+      toast.error(
+        "You are offline. Please check your internet connection and try again.",
+      );
       return;
     }
-    
+
     if (!profile?.department_id || !user?.id) {
-      toast.error('Missing department or user information');
+      toast.error("Missing department or user information");
       return;
     }
-    
-    const unsynced = localAttendance.filter(item => !item.synced);
+
+    const unsynced = localAttendance.filter((item) => !item.synced);
     if (unsynced.length === 0) {
-      toast.info('No unsynced attendance records to save');
+      toast.info("No unsynced attendance records to save");
       return;
     }
-    
+
     setSyncingAttendance(true);
-    
+
     let successCount = 0;
     let errorCount = 0;
-    
+
     try {
       // Build rows for a single batched upsert (fast: 1 round-trip instead of 2N)
-      const rows = unsynced.map(item => ({
+      const rows = unsynced.map((item) => ({
         student_ref: item.studentId,
         course_id: item.courseId,
         department_id: profile.department_id,
         marked_by: user.id,
         date: item.date,
-        status: item.status === 'P' ? 'present' : 'absent',
+        status: item.status === "P" ? "present" : "absent",
       }));
 
       // Chunk to avoid payload limits on very large saves
       const chunkSize = 500;
-      const chunks: typeof rows[] = [];
+      const chunks: (typeof rows)[] = [];
       for (let i = 0; i < rows.length; i += chunkSize) {
         chunks.push(rows.slice(i, i + chunkSize));
       }
 
       const results = await Promise.all(
-        chunks.map(chunk =>
+        chunks.map((chunk) =>
           (supabase as any)
-            .from('attendance')
-            .upsert(chunk, { onConflict: 'student_ref,course_id,date' })
-        )
+            .from("attendance")
+            .upsert(chunk, { onConflict: "student_ref,course_id,date" }),
+        ),
       );
 
       results.forEach((res, idx) => {
         if (res.error) {
-          console.error('Upsert error:', res.error);
+          console.error("Upsert error:", res.error);
           errorCount += chunks[idx].length;
         } else {
           successCount += chunks[idx].length;
@@ -575,60 +710,79 @@ const DeptAdminDashboard = () => {
       });
 
       if (successCount > 0) {
-        setLocalAttendance(prev =>
-          prev.map(item => {
-            const wasSynced = unsynced.some(u =>
-              u.studentId === item.studentId && u.date === item.date && u.courseId === item.courseId
+        setLocalAttendance((prev) =>
+          prev.map((item) => {
+            const wasSynced = unsynced.some(
+              (u) =>
+                u.studentId === item.studentId &&
+                u.date === item.date &&
+                u.courseId === item.courseId,
             );
-            return wasSynced ? { ...item, synced: true, error: undefined } : item;
-          })
+            return wasSynced
+              ? { ...item, synced: true, error: undefined }
+              : item;
+          }),
         );
 
-        toast.success(`Saved ${successCount} attendance record${successCount !== 1 ? 's' : ''}`);
+        toast.success(
+          `Saved ${successCount} attendance record${successCount !== 1 ? "s" : ""}`,
+        );
         // Refresh in parallel + don't block the UI
         void Promise.all([fetchAttendanceGrid(), fetchHistory()]);
       }
 
       if (errorCount > 0) {
-        toast.error(`Failed to sync ${errorCount} record${errorCount !== 1 ? 's' : ''}. Please try again.`);
+        toast.error(
+          `Failed to sync ${errorCount} record${errorCount !== 1 ? "s" : ""}. Please try again.`,
+        );
       }
     } catch (error: any) {
-      console.error('Sync error:', error);
-      toast.error(`Sync failed: ${error.message || 'Unknown error'}`);
-      
-      setLocalAttendance(prev => 
-        prev.map(item => {
-          const wasUnsynced = unsynced.some(u => 
-            u.studentId === item.studentId && u.date === item.date
+      console.error("Sync error:", error);
+      toast.error(`Sync failed: ${error.message || "Unknown error"}`);
+
+      setLocalAttendance((prev) =>
+        prev.map((item) => {
+          const wasUnsynced = unsynced.some(
+            (u) => u.studentId === item.studentId && u.date === item.date,
           );
           return wasUnsynced ? { ...item, error: error.message } : item;
-        })
+        }),
       );
     } finally {
       setSyncingAttendance(false);
     }
   };
 
-  
-
-  const pushToGoogleSheets = async (action: 'sync_unsynced' | 'export_all') => {
-    setSheetsBusy(action === 'export_all' ? 'export' : 'sync');
+  const pushToGoogleSheets = async (action: "sync_unsynced" | "export_all") => {
+    setSheetsBusy(action === "export_all" ? "export" : "sync");
     try {
-      const { data, error } = await supabase.functions.invoke('sheets-sync', { body: { action } });
+      const { data, error } = await supabase.functions.invoke("sheets-sync", {
+        body: { action },
+      });
       if (error) throw error;
-      if (!data?.ok) throw new Error(data?.error || 'Unknown error');
+      if (!data?.ok) throw new Error(data?.error || "Unknown error");
       if (data.synced > 0) {
-        toast.success(`Synced ${data.synced} record${data.synced !== 1 ? 's' : ''} to Google Sheets`, {
-          description: data.spreadsheetUrl ? 'Open spreadsheet' : undefined,
-          action: data.spreadsheetUrl ? { label: 'Open', onClick: () => window.open(data.spreadsheetUrl, '_blank') } : undefined,
-        });
+        toast.success(
+          `Synced ${data.synced} record${data.synced !== 1 ? "s" : ""} to Google Sheets`,
+          {
+            description: data.spreadsheetUrl ? "Open spreadsheet" : undefined,
+            action: data.spreadsheetUrl
+              ? {
+                  label: "Open",
+                  onClick: () => window.open(data.spreadsheetUrl, "_blank"),
+                }
+              : undefined,
+          },
+        );
       } else {
-        toast.info(data.message || 'Nothing new to sync');
+        toast.info(data.message || "Nothing new to sync");
       }
       await fetchHistory();
     } catch (err: any) {
-      console.error('Google Sheets sync failed:', err);
-      toast.error(`Google Sheets sync failed: ${err.message || 'Unknown error'}`);
+      console.error("Google Sheets sync failed:", err);
+      toast.error(
+        `Google Sheets sync failed: ${err.message || "Unknown error"}`,
+      );
     } finally {
       setSheetsBusy(false);
     }
@@ -638,118 +792,148 @@ const DeptAdminDashboard = () => {
     await syncAttendanceToDatabase();
     // Fire-and-forget Google Sheets push so the UI unblocks immediately.
     // Sheets sync can take several seconds; we don't make the user wait.
-    void pushToGoogleSheets('sync_unsynced').catch((err) => {
-      console.warn('Sheets background sync failed (non-blocking):', err);
+    void pushToGoogleSheets("sync_unsynced").catch((err) => {
+      console.warn("Sheets background sync failed (non-blocking):", err);
     });
   };
 
-
   const exportCSV = () => {
     if (students.length === 0) {
-      toast.error('No students to export');
+      toast.error("No students to export");
       return;
     }
 
-    const currentCourse = courses.find(c => c.id === selectedCourse);
-    const headers = ['S/N', 'Name', 'Gender', 'Matric No', 'Department', 'Course', ...dateColumns];
+    const currentCourse = courses.find((c) => c.id === selectedCourse);
+    const headers = [
+      "S/N",
+      "Name",
+      "Gender",
+      "Matric No",
+      "Department",
+      "Course",
+      ...dateColumns,
+    ];
     const rows = students.map((s, i) => {
       const cells = [
         String(i + 1),
         s.name,
-        s.gender || '',
-        s.matric_no || '',
+        s.gender || "",
+        s.matric_no || "",
         departmentName,
-        currentCourse?.name || 'All Courses',
-        ...dateColumns.map(d => grid[s.id]?.[d] || ''),
+        currentCourse?.name || "All Courses",
+        ...dateColumns.map((d) => grid[s.id]?.[d] || ""),
       ];
-      return cells.map(c => `"${String(c).replace(/"/g, '""')}"`).join(',');
+      return cells.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(",");
     });
 
-    const csv = "\uFEFF" + [headers.join(','), ...rows].join('\n');
-    const blob = new Blob([csv], { type: 'text/csv' });
+    const csv = "\uFEFF" + [headers.join(","), ...rows].join("\n");
+    const blob = new Blob([csv], { type: "text/csv" });
     const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
+    const a = document.createElement("a");
     a.href = url;
-    a.download = `attendance_${departmentName}_${currentCourse?.code || 'all'}_${dateColumns[0]}.csv`;
+    a.download = `attendance_${departmentName}_${currentCourse?.code || "all"}_${dateColumns[0]}.csv`;
     a.click();
     URL.revokeObjectURL(url);
-    toast.success('CSV exported successfully');
+    toast.success("CSV exported successfully");
   };
 
   const exportExcel = () => {
     if (students.length === 0) {
-      toast.error('No students to export');
+      toast.error("No students to export");
       return;
     }
 
-    const currentCourse = courses.find(c => c.id === selectedCourse);
+    const currentCourse = courses.find((c) => c.id === selectedCourse);
     const data = students.map((s, i) => {
       const row: any = {
         "S/N": i + 1,
-        "Name": s.name,
-        "Gender": s.gender || '',
-        "Matric No": s.matric_no || '',
-        "Department": departmentName,
-        "Course": currentCourse?.name || 'All Courses',
+        Name: s.name,
+        Gender: s.gender || "",
+        "Matric No": s.matric_no || "",
+        Department: departmentName,
+        Course: currentCourse?.name || "All Courses",
       };
 
-      dateColumns.forEach(d => {
-        const value = grid[s.id]?.[d] || '';
-        row[d] = value === 'P' ? 'Present' : value === 'A' ? 'Absent' : '';
+      dateColumns.forEach((d) => {
+        const value = grid[s.id]?.[d] || "";
+        row[d] = value === "P" ? "Present" : value === "A" ? "Absent" : "";
       });
 
       return row;
     });
 
     const worksheet = XLSX.utils.json_to_sheet(data);
-    const cols = Object.keys(data[0]).map(key => ({
-      wch: Math.max(key.length, ...data.map(row => String(row[key] || '').length)) + 2
+    const cols = Object.keys(data[0]).map((key) => ({
+      wch:
+        Math.max(
+          key.length,
+          ...data.map((row) => String(row[key] || "").length),
+        ) + 2,
     }));
-    worksheet['!cols'] = cols;
+    worksheet["!cols"] = cols;
 
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, "Attendance");
-    XLSX.writeFile(workbook, `attendance_${departmentName}_${currentCourse?.code || 'all'}.xlsx`);
-    toast.success('Excel exported successfully');
+    XLSX.writeFile(
+      workbook,
+      `attendance_${departmentName}_${currentCourse?.code || "all"}.xlsx`,
+    );
+    toast.success("Excel exported successfully");
   };
 
   const generatePDF = (): jsPDF => {
     const doc = new jsPDF();
-    const currentCourse = courses.find(c => c.id === selectedCourse);
-    
+    const currentCourse = courses.find((c) => c.id === selectedCourse);
+
     doc.setFontSize(16);
-    doc.text('ATTENDANCE REPORT', 105, 15, { align: 'center' });
-    
+    doc.text("ATTENDANCE REPORT", 105, 15, { align: "center" });
+
     doc.setFontSize(12);
     doc.text(`Department: ${departmentName}`, 14, 25);
-    doc.text(`Course: ${currentCourse ? `${currentCourse.code} - ${currentCourse.name}` : 'All Courses'}`, 14, 32);
+    doc.text(
+      `Course: ${currentCourse ? `${currentCourse.code} - ${currentCourse.name}` : "All Courses"}`,
+      14,
+      32,
+    );
     doc.text(`Date Generated: ${new Date().toLocaleDateString()}`, 14, 39);
-    
-    const filteredHistory = selectedCourse 
-      ? history.filter(r => r.course_id === selectedCourse)
+
+    const filteredHistory = selectedCourse
+      ? history.filter((r) => r.course_id === selectedCourse)
       : history;
-    
+
     const tableData = filteredHistory.map((a, i) => [
       i + 1,
-      a.students?.name ?? 'Unknown',
-      a.students?.matric_no ?? '-',
-      a.students?.gender ?? '-',
-      a.courses?.name ?? '-',
+      a.students?.name ?? "Unknown",
+      a.students?.matric_no ?? "-",
+      a.students?.gender ?? "-",
+      a.courses?.name ?? "-",
       a.date,
       a.status,
     ]);
-    
+
     autoTable(doc, {
       startY: 48,
-      head: [['S/N', 'Student Name', 'Matric No', 'Gender', 'Course', 'Date', 'Status']],
+      head: [
+        [
+          "S/N",
+          "Student Name",
+          "Matric No",
+          "Gender",
+          "Course",
+          "Date",
+          "Status",
+        ],
+      ],
       body: tableData,
       styles: { fontSize: 10, cellPadding: 3 },
       headStyles: { fillColor: [22, 160, 133], textColor: 255 },
       alternateRowStyles: { fillColor: [240, 240, 240] },
       didParseCell: function (data) {
         if (data.column.index === 6) {
-          if (data.cell.raw === 'present') data.cell.styles.textColor = [0, 150, 0];
-          if (data.cell.raw === 'absent') data.cell.styles.textColor = [200, 0, 0];
+          if (data.cell.raw === "present")
+            data.cell.styles.textColor = [0, 150, 0];
+          if (data.cell.raw === "absent")
+            data.cell.styles.textColor = [200, 0, 0];
         }
       },
     });
@@ -763,12 +947,15 @@ const DeptAdminDashboard = () => {
       doc.saveGraphicsState();
       doc.setFontSize(60);
       doc.setTextColor(200, 200, 200);
-      doc.setGState(new (doc as any).GState({ opacity: 0.40 }));
-      doc.text('Attendtrack', pageWidth / 2, pageHeight / 2, { align: 'center', angle: 45 });
+      doc.setGState(new (doc as any).GState({ opacity: 0.4 }));
+      doc.text("Attendtrack", pageWidth / 2, pageHeight / 2, {
+        align: "center",
+        angle: 45,
+      });
       doc.restoreGraphicsState();
       doc.setFontSize(10);
       doc.setTextColor(0, 0, 0);
-      doc.text(`Page ${i} of ${pageCount}`, 105, 290, { align: 'center' });
+      doc.text(`Page ${i} of ${pageCount}`, 105, 290, { align: "center" });
     }
 
     return doc;
@@ -776,80 +963,100 @@ const DeptAdminDashboard = () => {
 
   const sharePDF = async () => {
     const filteredHistory = selectedCourse
-      ? history.filter(r => r.course_id === selectedCourse)
+      ? history.filter((r) => r.course_id === selectedCourse)
       : history;
 
     if (filteredHistory.length === 0) {
-      toast.error('No attendance history to share');
+      toast.error("No attendance history to share");
       return;
     }
 
     try {
       const doc = generatePDF();
-      const pdfBlob = doc.output('blob');
-      const currentCourse = courses.find(c => c.id === selectedCourse);
-      const fileName = `attendance_${departmentName}_${currentCourse?.code || 'all'}.pdf`;
-      const message = `Attendance report for ${departmentName}${currentCourse ? ` - ${currentCourse.name}` : ''}`;
+      const pdfBlob = doc.output("blob");
+      const currentCourse = courses.find((c) => c.id === selectedCourse);
+      const fileName = `attendance_${departmentName}_${currentCourse?.code || "all"}.pdf`;
+      const message = `Attendance report for ${departmentName}${currentCourse ? ` - ${currentCourse.name}` : ""}`;
 
       pdfBlobRef.current = pdfBlob;
       setShareFileName(fileName);
       setShareMessage(message);
       setShowShareDialog(true);
     } catch (error: any) {
-      console.error('Share error:', error);
-      toast.error('Failed to prepare PDF');
+      console.error("Share error:", error);
+      toast.error("Failed to prepare PDF");
     }
   };
 
   const downloadPDF = () => {
     if (!pdfBlobRef.current) return;
     const url = URL.createObjectURL(pdfBlobRef.current);
-    const a = document.createElement('a');
+    const a = document.createElement("a");
     a.href = url;
     a.download = shareFileName;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
     setTimeout(() => URL.revokeObjectURL(url), 1000);
-    toast.success('PDF downloaded');
+    toast.success("PDF downloaded");
   };
 
   const shareViaNative = async () => {
     if (!pdfBlobRef.current) return;
     try {
-      const file = new File([pdfBlobRef.current], shareFileName, { type: 'application/pdf' });
-      const shareData: any = { title: 'Attendance Report', text: shareMessage, files: [file] };
-      if (typeof navigator !== 'undefined' && typeof navigator.canShare === 'function' && navigator.canShare(shareData)) {
+      const file = new File([pdfBlobRef.current], shareFileName, {
+        type: "application/pdf",
+      });
+      const shareData: any = {
+        title: "Attendance Report",
+        text: shareMessage,
+        files: [file],
+      };
+      if (
+        typeof navigator !== "undefined" &&
+        typeof navigator.canShare === "function" &&
+        navigator.canShare(shareData)
+      ) {
         await navigator.share(shareData);
-        toast.success('Shared successfully');
+        toast.success("Shared successfully");
         setShowShareDialog(false);
       } else {
-        toast.error('Native sharing not supported here. Please download and share manually.');
+        toast.error(
+          "Native sharing not supported here. Please download and share manually.",
+        );
       }
     } catch (err: any) {
-      if (err?.name === 'AbortError') return;
-      console.warn('Native share failed:', err);
-      toast.error('Native share blocked. Please download the PDF and share manually.');
+      if (err?.name === "AbortError") return;
+      console.warn("Native share failed:", err);
+      toast.error(
+        "Native share blocked. Please download the PDF and share manually.",
+      );
     }
   };
 
   const shareViaWhatsApp = () => {
     downloadPDF();
-    window.open(`https://wa.me/?text=${encodeURIComponent(shareMessage + ' (PDF downloaded — please attach it)')}`, '_blank');
+    window.open(
+      `https://wa.me/?text=${encodeURIComponent(shareMessage + " (PDF downloaded — please attach it)")}`,
+      "_blank",
+    );
   };
 
   const shareViaTelegram = () => {
     downloadPDF();
-    window.open(`https://t.me/share/url?url=${encodeURIComponent(shareMessage)}&text=${encodeURIComponent(shareMessage)}`, '_blank');
+    window.open(
+      `https://t.me/share/url?url=${encodeURIComponent(shareMessage)}&text=${encodeURIComponent(shareMessage)}`,
+      "_blank",
+    );
   };
 
   const shareViaEmail = () => {
     downloadPDF();
-    window.location.href = `mailto:?subject=${encodeURIComponent('Attendance Report')}&body=${encodeURIComponent(shareMessage + '\n\nPlease find the attached PDF (downloaded to your device).')}`;
+    window.location.href = `mailto:?subject=${encodeURIComponent("Attendance Report")}&body=${encodeURIComponent(shareMessage + "\n\nPlease find the attached PDF (downloaded to your device).")}`;
   };
 
   const updateStudentField = (id: string, field: string, value: string) => {
-    setStudentEdits(prev => ({
+    setStudentEdits((prev) => ({
       ...prev,
       [id]: { ...prev[id], [field]: value },
     }));
@@ -859,14 +1066,17 @@ const DeptAdminDashboard = () => {
     setSavingStudents(true);
     const editEntries = Object.entries(studentEdits);
     if (editEntries.length === 0) {
-      toast.info('No changes to save');
+      toast.info("No changes to save");
       setSavingStudents(false);
       return;
     }
 
     let hasError = false;
     for (const [id, edits] of editEntries) {
-      const { error } = await (supabase as any).from('students').update(edits).eq('id', id);
+      const { error } = await (supabase as any)
+        .from("students")
+        .update(edits)
+        .eq("id", id);
       if (error) {
         toast.error(`Failed to update student: ${error.message}`);
         hasError = true;
@@ -875,7 +1085,7 @@ const DeptAdminDashboard = () => {
     }
 
     if (!hasError) {
-      toast.success('Student details saved successfully');
+      toast.success("Student details saved successfully");
       setStudentEdits({});
       fetchStudents();
     }
@@ -884,14 +1094,14 @@ const DeptAdminDashboard = () => {
 
   const addStudent = async () => {
     if (!newStudent.name.trim()) {
-      toast.error('Name is required');
+      toast.error("Name is required");
       return;
     }
     if (!profile?.department_id) return;
     setAddingStudent(true);
 
     try {
-      const { error } = await (supabase as any).from('students').insert({
+      const { error } = await (supabase as any).from("students").insert({
         name: newStudent.name.trim(),
         gender: newStudent.gender || null,
         matric_no: newStudent.matric_no.trim() || null,
@@ -900,8 +1110,8 @@ const DeptAdminDashboard = () => {
 
       if (error) throw error;
 
-      toast.success('Student added successfully');
-      setNewStudent({ name: '', gender: '', matric_no: '' });
+      toast.success("Student added successfully");
+      setNewStudent({ name: "", gender: "", matric_no: "" });
       setShowAddDialog(false);
       await fetchStudents();
     } catch (error: any) {
@@ -912,13 +1122,21 @@ const DeptAdminDashboard = () => {
   };
 
   const deleteStudent = async (id: string, name: string) => {
-    if (!confirm(`Delete student "${name}"? This will also delete their attendance records. This cannot be undone.`)) return;
-    
+    if (
+      !confirm(
+        `Delete student "${name}"? This will also delete their attendance records. This cannot be undone.`,
+      )
+    )
+      return;
+
     try {
-      const { error } = await (supabase as any).from('students').delete().eq('id', id);
+      const { error } = await (supabase as any)
+        .from("students")
+        .delete()
+        .eq("id", id);
       if (error) throw error;
-      
-      toast.success('Student deleted successfully');
+
+      toast.success("Student deleted successfully");
       await fetchStudents();
     } catch (error: any) {
       toast.error(`Failed to delete student: ${error.message}`);
@@ -932,17 +1150,23 @@ const DeptAdminDashboard = () => {
     setImporting(true);
     try {
       const text = await file.text();
-      const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
+      const lines = text
+        .split("\n")
+        .map((l) => l.trim())
+        .filter(Boolean);
       if (lines.length < 2) {
-        toast.error('CSV must have a header row and at least one data row');
+        toast.error("CSV must have a header row and at least one data row");
         setImporting(false);
         return;
       }
 
-      const headers = lines[0].toLowerCase().split(',').map(h => h.trim());
-      const nameIdx = headers.findIndex(h => h === 'name');
-      const genderIdx = headers.findIndex(h => h === 'gender');
-      const matricIdx = headers.findIndex(h => h.includes('matric'));
+      const headers = lines[0]
+        .toLowerCase()
+        .split(",")
+        .map((h) => h.trim());
+      const nameIdx = headers.findIndex((h) => h === "name");
+      const genderIdx = headers.findIndex((h) => h === "gender");
+      const matricIdx = headers.findIndex((h) => h.includes("matric"));
 
       if (nameIdx === -1) {
         toast.error('CSV must have a "name" column');
@@ -950,49 +1174,59 @@ const DeptAdminDashboard = () => {
         return;
       }
 
-      const csvRows = lines.slice(1).map(line => {
-        const cols = line.split(',').map(c => c.trim());
-        return {
-          name: cols[nameIdx] || '',
-          gender: genderIdx >= 0 ? cols[genderIdx] || null : null,
-          matric_no: matricIdx >= 0 ? cols[matricIdx] || null : null,
-          department_id: profile.department_id!,
-        };
-      }).filter(s => s.name);
+      const csvRows = lines
+        .slice(1)
+        .map((line) => {
+          const cols = line.split(",").map((c) => c.trim());
+          return {
+            name: cols[nameIdx] || "",
+            gender: genderIdx >= 0 ? cols[genderIdx] || null : null,
+            matric_no: matricIdx >= 0 ? cols[matricIdx] || null : null,
+            department_id: profile.department_id!,
+          };
+        })
+        .filter((s) => s.name);
 
       if (csvRows.length === 0) {
-        toast.error('No valid students found in CSV');
+        toast.error("No valid students found in CSV");
         setImporting(false);
         return;
       }
 
-      const { error } = await (supabase as any).from('students').insert(csvRows);
+      const { error } = await (supabase as any)
+        .from("students")
+        .insert(csvRows);
       if (error) throw error;
-      
+
       toast.success(`Successfully imported ${csvRows.length} students`);
       await fetchStudents();
     } catch (error: any) {
       toast.error(`Import failed: ${error.message}`);
     } finally {
       setImporting(false);
-      if (fileInputRef.current) fileInputRef.current.value = '';
+      if (fileInputRef.current) fileInputRef.current.value = "";
     }
   };
 
   const deleteAllHistory = async () => {
-    if (!confirm('⚠️ WARNING: This will delete ALL attendance history for your department. This action cannot be undone. Are you absolutely sure?')) return;
+    if (
+      !confirm(
+        "⚠️ WARNING: This will delete ALL attendance history for your department. This action cannot be undone. Are you absolutely sure?",
+      )
+    )
+      return;
     if (!profile?.department_id) return;
-    
+
     setDeletingHistory(true);
     try {
       const { error } = await (supabase as any)
-        .from('attendance')
+        .from("attendance")
         .delete()
-        .eq('department_id', profile.department_id);
-      
+        .eq("department_id", profile.department_id);
+
       if (error) throw error;
-      
-      toast.success('All attendance history deleted');
+
+      toast.success("All attendance history deleted");
       setHistory([]);
       setGrid({});
       clearLocalAttendance();
@@ -1005,16 +1239,17 @@ const DeptAdminDashboard = () => {
 
   const studentStats = useMemo(() => {
     const month = new Date().toISOString().slice(0, 7);
-    const filteredHistoryForStats = historyCourseFilter !== 'all'
-      ? history.filter(r => r.course_id === historyCourseFilter)
-      : history;
+    const filteredHistoryForStats =
+      historyCourseFilter !== "all"
+        ? history.filter((r) => r.course_id === historyCourseFilter)
+        : history;
 
-    return students.map(student => {
+    return students.map((student) => {
       const records = filteredHistoryForStats.filter(
-        r => r.student_ref === student.id && r.date.startsWith(month)
+        (r) => r.student_ref === student.id && r.date.startsWith(month),
       );
       const total = records.length;
-      const present = records.filter(r => r.status === 'present').length;
+      const present = records.filter((r) => r.status === "present").length;
       const percent = total ? (present / total) * 100 : 0;
       return { ...student, present, total, percent };
     });
@@ -1024,26 +1259,31 @@ const DeptAdminDashboard = () => {
     let result = studentStats;
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
-      result = result.filter(s =>
-        s.name.toLowerCase().includes(q) ||
-        (s.matric_no && s.matric_no.toLowerCase().includes(q))
+      result = result.filter(
+        (s) =>
+          s.name.toLowerCase().includes(q) ||
+          (s.matric_no && s.matric_no.toLowerCase().includes(q)),
       );
     }
-    if (filterPercent === 'below75') {
-      result = result.filter(s => s.percent < 75);
-    } else if (filterPercent === 'above75') {
-      result = result.filter(s => s.percent >= 75);
+    if (filterPercent === "below75") {
+      result = result.filter((s) => s.percent < 75);
+    } else if (filterPercent === "above75") {
+      result = result.filter((s) => s.percent >= 75);
     }
     return result;
   }, [studentStats, searchQuery, filterPercent]);
 
   const filteredHistory = useMemo(() => {
-    if (historyCourseFilter === 'all') return history;
-    return history.filter(r => r.course_id === historyCourseFilter);
+    if (historyCourseFilter === "all") return history;
+    return history.filter((r) => r.course_id === historyCourseFilter);
   }, [history, historyCourseFilter]);
 
-  const pendingSyncCount = localAttendance.filter(item => !item.synced).length;
-  const failedSyncCount = localAttendance.filter(item => item.error && !item.synced).length;
+  const pendingSyncCount = localAttendance.filter(
+    (item) => !item.synced,
+  ).length;
+  const failedSyncCount = localAttendance.filter(
+    (item) => item.error && !item.synced,
+  ).length;
 
   if (!profile?.department_id) {
     return (
@@ -1052,8 +1292,13 @@ const DeptAdminDashboard = () => {
           <Card className="max-w-md">
             <CardContent className="pt-6 text-center">
               <AlertCircle className="w-12 h-12 text-yellow-500 mx-auto mb-4" />
-              <p className="text-muted-foreground">You haven't been assigned to a department yet.</p>
-              <p className="text-sm text-muted-foreground mt-2">Please contact a super administrator to assign you to a department.</p>
+              <p className="text-muted-foreground">
+                You haven't been assigned to a department yet.
+              </p>
+              <p className="text-sm text-muted-foreground mt-2">
+                Please contact a super administrator to assign you to a
+                department.
+              </p>
             </CardContent>
           </Card>
         </div>
@@ -1062,141 +1307,186 @@ const DeptAdminDashboard = () => {
   }
 
   const statusStyles: Record<string, string> = {
-    present: 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200',
-    absent: 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200',
+    present:
+      "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200",
+    absent: "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200",
   };
 
   const cellStyles: Record<string, string> = {
-    P: 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200',
-    A: 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200',
-    '': 'bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400',
+    P: "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200",
+    A: "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200",
+    "": "bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400",
   };
 
   const tabs = [
-    { id: 'mark' as const, label: 'Mark Attendance', icon: CalendarCheck },
-    { id: 'students' as const, label: 'Students', icon: Users },
-    { id: 'history' as const, label: 'History', icon: History },
-    { id: 'logins' as const, label: 'Login Log', icon: ShieldCheck },
+    { id: "mark" as const, label: "Mark Attendance", icon: CalendarCheck },
+    { id: "students" as const, label: "Students", icon: Users },
+    { id: "history" as const, label: "History", icon: History },
+    { id: "logins" as const, label: "Login Log", icon: ShieldCheck },
   ];
 
   const fetchLoginEvents = async () => {
     setLoginEventsLoading(true);
     try {
       const { data, error } = await (supabase as any)
-        .from('student_login_events')
-        .select('id, created_at, event, matric_no, student_id, detail')
-        .order('created_at', { ascending: false })
+        .from("student_login_events")
+        .select("id, created_at, event, matric_no, student_id, detail")
+        .order("created_at", { ascending: false })
         .limit(500);
       if (error) throw error;
       setLoginEvents(data ?? []);
     } catch (e: any) {
-      toast.error(e?.message || 'Failed to load login events');
+      toast.error(e?.message || "Failed to load login events");
     } finally {
       setLoginEventsLoading(false);
     }
   };
 
   useEffect(() => {
-    if (activeTab === 'logins') fetchLoginEvents();
+    if (activeTab === "logins") fetchLoginEvents();
   }, [activeTab]);
 
   const fetchSheetHistory = async () => {
     setSheetHistoryLoading(true);
     try {
-      const { data, error } = await (supabase as any).functions.invoke('sheets-sync', {
-        body: { action: 'read_all' },
-      });
+      const { data, error } = await (supabase as any).functions.invoke(
+        "sheets-sync",
+        {
+          body: { action: "read_all" },
+        },
+      );
       if (error) throw error;
-      if (!data?.ok) throw new Error(data?.error || 'Failed to read Google Sheet');
+      if (!data?.ok)
+        throw new Error(data?.error || "Failed to read Google Sheet");
       setSheetUrl(data.spreadsheetUrl ?? null);
-      const rows: AttendanceRecord[] = (data.rows ?? []).map((r: any, i: number) => ({
-        id: r.attendance_id || `sheet-${i}`,
-        student_ref: '',
-        course_id: '',
-        date: r.date,
-        status: (r.status || '').toLowerCase(),
-        students: { name: r.student_name, matric_no: r.matric_no, gender: r.gender },
-        courses: { name: r.course_name, code: r.course_code },
-      }) as AttendanceRecord);
+      const rows: AttendanceRecord[] = (data.rows ?? []).map(
+        (r: any, i: number) =>
+          ({
+            id: r.attendance_id || `sheet-${i}`,
+            student_ref: "",
+            course_id: "",
+            date: r.date,
+            status: (r.status || "").toLowerCase(),
+            students: {
+              name: r.student_name,
+              matric_no: r.matric_no,
+              gender: r.gender,
+            },
+            courses: { name: r.course_name, code: r.course_code },
+          }) as AttendanceRecord,
+      );
       // newest first by date
-      rows.sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+      rows.sort((a, b) => (b.date || "").localeCompare(a.date || ""));
       setSheetHistory(rows);
     } catch (e: any) {
-      console.error('sheet history error', e);
-      toast.error(e?.message || 'Failed to load Google Sheet history');
+      console.error("sheet history error", e);
+      toast.error(e?.message || "Failed to load Google Sheet history");
     } finally {
       setSheetHistoryLoading(false);
     }
   };
 
   useEffect(() => {
-    if (activeTab === 'history' && historySource === 'sheet' && sheetHistory.length === 0 && !sheetHistoryLoading) {
+    if (
+      activeTab === "history" &&
+      historySource === "sheet" &&
+      sheetHistory.length === 0 &&
+      !sheetHistoryLoading
+    ) {
       fetchSheetHistory();
     }
-     
   }, [activeTab, historySource]);
-
-
 
   // Live QR session helpers
   const createQrSession = async () => {
-    if (!qrCourseId) { toast.error('Pick a course first'); return; }
-    if (!profile?.department_id || !user) { toast.error('Missing profile'); return; }
-    if (qrLat == null || qrLng == null) { toast.error('Pick the class location on the map'); return; }
+    if (!qrCourseId) {
+      toast.error("Pick a course first");
+      return;
+    }
+    if (!profile?.department_id || !user) {
+      toast.error("Missing profile");
+      return;
+    }
+    if (qrLat == null || qrLng == null) {
+      toast.error("Pick the class location on the map");
+      return;
+    }
     setQrCreating(true);
     try {
       const token = Array.from(crypto.getRandomValues(new Uint8Array(18)))
-        .map((b) => 'abcdefghijklmnopqrstuvwxyz0123456789'[b % 36]).join('');
-      const expires_at = new Date(Date.now() + qrDurationMin * 60_000).toISOString();
-      const { data, error } = await (supabase as any).from('attendance_sessions').insert({
-        course_id: qrCourseId,
-        department_id: profile.department_id,
-        date: qrDate,
-        token,
-        expires_at,
-        created_by: user.id,
-        latitude: qrLat,
-        longitude: qrLng,
-        radius_m: qrRadius,
-      }).select('token, expires_at, course_id, date').single();
+        .map((b) => "abcdefghijklmnopqrstuvwxyz0123456789"[b % 36])
+        .join("");
+      const expires_at = new Date(
+        Date.now() + qrDurationMin * 60_000,
+      ).toISOString();
+      const { data, error } = await (supabase as any)
+        .from("attendance_sessions")
+        .insert({
+          course_id: qrCourseId,
+          department_id: profile.department_id,
+          date: qrDate,
+          token,
+          expires_at,
+          created_by: user.id,
+          latitude: qrLat,
+          longitude: qrLng,
+          radius_m: qrRadius,
+        })
+        .select("token, expires_at, course_id, date")
+        .single();
       if (error) throw error;
       setQrSession(data);
-      toast.success('Live session started');
+      toast.success("Live session started");
     } catch (e: any) {
-      toast.error(e.message ?? 'Failed to start session');
+      toast.error(e.message ?? "Failed to start session");
     } finally {
       setQrCreating(false);
     }
   };
 
   const useMyLocation = () => {
-    if (!navigator.geolocation) { toast.error('Geolocation not supported'); return; }
-    toast.message('Getting your location...');
+    if (!navigator.geolocation) {
+      toast.error("Geolocation not supported");
+      return;
+    }
+    toast.message("Getting your location...");
     navigator.geolocation.getCurrentPosition(
-      (pos) => { setQrLat(pos.coords.latitude); setQrLng(pos.coords.longitude); toast.success('Location captured'); },
-      (err) => toast.error('Location failed: ' + err.message),
-      { enableHighAccuracy: true, timeout: 10000 }
+      (pos) => {
+        setQrLat(pos.coords.latitude);
+        setQrLng(pos.coords.longitude);
+        toast.success("Location captured");
+      },
+      (err) => toast.error("Location failed: " + err.message),
+      { enableHighAccuracy: true, timeout: 10000 },
     );
   };
 
   const endQrSession = async () => {
     if (!qrSession) return;
-    await (supabase as any).from('attendance_sessions').update({ expires_at: new Date().toISOString() }).eq('token', qrSession.token);
+    await (supabase as any)
+      .from("attendance_sessions")
+      .update({ expires_at: new Date().toISOString() })
+      .eq("token", qrSession.token);
     setQrSession(null);
-    toast.message('Session ended');
+    toast.message("Session ended");
   };
 
   const endAndMarkAbsent = async () => {
     if (!qrSession) return;
     setQrEnding(true);
     try {
-      const { data, error } = await supabase.functions.invoke('end-session', { body: { token: qrSession.token } });
-      if (error || (data as any)?.error) throw new Error((data as any)?.error || error?.message);
-      toast.success(`Session ended. ${(data as any)?.marked_absent ?? 0} student(s) marked absent.`);
+      const { data, error } = await supabase.functions.invoke("end-session", {
+        body: { token: qrSession.token },
+      });
+      if (error || (data as any)?.error)
+        throw new Error((data as any)?.error || error?.message);
+      toast.success(
+        `Session ended. ${(data as any)?.marked_absent ?? 0} student(s) marked absent.`,
+      );
       setQrSession(null);
       fetchHistory();
     } catch (e: any) {
-      toast.error(e.message ?? 'Failed to end session');
+      toast.error(e.message ?? "Failed to end session");
     } finally {
       setQrEnding(false);
     }
@@ -1205,14 +1495,27 @@ const DeptAdminDashboard = () => {
   const provisionStudentLogins = async () => {
     setProvisioningAuth(true);
     try {
-      const { data, error } = await supabase.functions.invoke('provision-student-auth', { body: {} });
-      if (error || (data as any)?.error) throw new Error((data as any)?.error || error?.message);
-      const created = (data as any)?.results?.filter((r: any) => r.status === 'created').length ?? 0;
-      const existing = (data as any)?.results?.filter((r: any) => r.status === 'already_provisioned').length ?? 0;
-      const failed = (data as any)?.results?.filter((r: any) => r.error || r.skipped).length ?? 0;
-      toast.success(`Provisioned ${created} new, ${existing} already had logins${failed ? `, ${failed} skipped/failed` : ''}.`);
+      const { data, error } = await supabase.functions.invoke(
+        "provision-student-auth",
+        { body: {} },
+      );
+      if (error || (data as any)?.error)
+        throw new Error((data as any)?.error || error?.message);
+      const created =
+        (data as any)?.results?.filter((r: any) => r.status === "created")
+          .length ?? 0;
+      const existing =
+        (data as any)?.results?.filter(
+          (r: any) => r.status === "already_provisioned",
+        ).length ?? 0;
+      const failed =
+        (data as any)?.results?.filter((r: any) => r.error || r.skipped)
+          .length ?? 0;
+      toast.success(
+        `Provisioned ${created} new, ${existing} already had logins${failed ? `, ${failed} skipped/failed` : ""}.`,
+      );
     } catch (e: any) {
-      toast.error(e.message ?? 'Failed to provision logins');
+      toast.error(e.message ?? "Failed to provision logins");
     } finally {
       setProvisioningAuth(false);
     }
@@ -1220,37 +1523,61 @@ const DeptAdminDashboard = () => {
 
   const [resettingLogins, setResettingLogins] = useState(false);
   const resetStudentLogins = async () => {
-    if (!confirm('Reset one-time login lock for ALL students in your department? They will be able to sign in again once.')) return;
+    if (
+      !confirm(
+        "Reset one-time login lock for ALL students in your department? They will be able to sign in again once.",
+      )
+    )
+      return;
     setResettingLogins(true);
     try {
-      const { data, error } = await supabase.functions.invoke('provision-student-auth', { body: { action: 'reset_login' } });
-      if (error || (data as any)?.error) throw new Error((data as any)?.error || error?.message);
-      const n = (data as any)?.results?.filter((r: any) => r.status === 'login_reset').length ?? 0;
+      const { data, error } = await supabase.functions.invoke(
+        "provision-student-auth",
+        { body: { action: "reset_login" } },
+      );
+      if (error || (data as any)?.error)
+        throw new Error((data as any)?.error || error?.message);
+      const n =
+        (data as any)?.results?.filter((r: any) => r.status === "login_reset")
+          .length ?? 0;
       toast.success(`Reset login lock for ${n} student(s).`);
     } catch (e: any) {
-      toast.error(e.message ?? 'Failed to reset logins');
+      toast.error(e.message ?? "Failed to reset logins");
     } finally {
       setResettingLogins(false);
     }
   };
 
-  const [resettingStudentId, setResettingStudentId] = useState<string | null>(null);
-  const resetSingleStudentLogin = async (studentId: string, studentName: string) => {
-    if (!confirm(`Reset one-time login lock for ${studentName}? They will be able to sign in again once.`)) return;
+  const [resettingStudentId, setResettingStudentId] = useState<string | null>(
+    null,
+  );
+  const resetSingleStudentLogin = async (
+    studentId: string,
+    studentName: string,
+  ) => {
+    if (
+      !confirm(
+        `Reset one-time login lock for ${studentName}? They will be able to sign in again once.`,
+      )
+    )
+      return;
     setResettingStudentId(studentId);
     try {
-      const { data, error } = await supabase.functions.invoke('provision-student-auth', {
-        body: { action: 'reset_login', student_id: studentId },
-      });
-      if (error || (data as any)?.error) throw new Error((data as any)?.error || error?.message);
+      const { data, error } = await supabase.functions.invoke(
+        "provision-student-auth",
+        {
+          body: { action: "reset_login", student_id: studentId },
+        },
+      );
+      if (error || (data as any)?.error)
+        throw new Error((data as any)?.error || error?.message);
       toast.success(`Login lock reset for ${studentName}.`);
     } catch (e: any) {
-      toast.error(e.message ?? 'Failed to reset login');
+      toast.error(e.message ?? "Failed to reset login");
     } finally {
       setResettingStudentId(null);
     }
   };
-
 
   if (initialLoading) {
     return <LoadingScreen message="Loading dashboard..." />;
@@ -1261,17 +1588,22 @@ const DeptAdminDashboard = () => {
       <div className="space-y-6">
         <div className="flex flex-wrap justify-between items-start gap-3">
           <div className="min-w-0">
-            <h2 className="text-xl sm:text-2xl font-bold">Department Admin Dashboard</h2>
+            <h2 className="text-xl sm:text-2xl font-bold">
+              Department Admin Dashboard
+            </h2>
             <p className="text-muted-foreground text-sm mt-1 truncate">
-              Department: <span className="font-semibold text-foreground">{departmentName}</span>
+              Department:{" "}
+              <span className="font-semibold text-foreground">
+                {departmentName}
+              </span>
             </p>
           </div>
           <div className="flex items-center gap-2">
-            {connectionStatus === 'online' ? (
+            {connectionStatus === "online" ? (
               <Badge className="bg-green-100 text-green-800">
                 <Check className="w-3 h-3 mr-1" /> Online
               </Badge>
-            ) : connectionStatus === 'offline' ? (
+            ) : connectionStatus === "offline" ? (
               <Badge className="bg-red-100 text-red-800">
                 <WifiOff className="w-3 h-3 mr-1" /> Offline
               </Badge>
@@ -1285,7 +1617,6 @@ const DeptAdminDashboard = () => {
 
         <ProgressSummary department={departmentName} />
 
-
         <Card>
           <CardHeader>
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
@@ -1293,34 +1624,60 @@ const DeptAdminDashboard = () => {
                 <CardTitle className="text-lg flex items-center gap-2">
                   <BookOpen className="w-5 h-5" /> Courses / Subjects
                 </CardTitle>
-                <p className="text-sm text-muted-foreground">Add courses like PHY 101, CHM 101 to mark attendance separately</p>
+                <p className="text-sm text-muted-foreground">
+                  Add courses like PHY 101, CHM 101 to mark attendance
+                  separately
+                </p>
               </div>
-              <Dialog open={showCourseDialog} onOpenChange={setShowCourseDialog}>
+              <Dialog
+                open={showCourseDialog}
+                onOpenChange={setShowCourseDialog}
+              >
                 <DialogTrigger asChild>
-                  <Button size="sm"><Plus className="w-4 h-4 mr-1" /> Add Course</Button>
+                  <Button size="sm">
+                    <Plus className="w-4 h-4 mr-1" /> Add Course
+                  </Button>
                 </DialogTrigger>
                 <DialogContent>
-                  <DialogHeader><DialogTitle>Add New Course</DialogTitle></DialogHeader>
+                  <DialogHeader>
+                    <DialogTitle>Add New Course</DialogTitle>
+                  </DialogHeader>
                   <div className="space-y-4 pt-2">
                     <div>
-                      <label className="text-sm font-medium">Course Code *</label>
-                      <Input 
-                        value={newCourse.code} 
-                        onChange={e => setNewCourse(p => ({ ...p, code: e.target.value }))} 
-                        placeholder="e.g., PHY 101, CHM 101" 
+                      <label className="text-sm font-medium">
+                        Course Code *
+                      </label>
+                      <Input
+                        value={newCourse.code}
+                        onChange={(e) =>
+                          setNewCourse((p) => ({ ...p, code: e.target.value }))
+                        }
+                        placeholder="e.g., PHY 101, CHM 101"
                       />
                     </div>
                     <div>
-                      <label className="text-sm font-medium">Course Name *</label>
-                      <Input 
-                        value={newCourse.name} 
-                        onChange={e => setNewCourse(p => ({ ...p, name: e.target.value }))} 
-                        placeholder="e.g., General Physics, Organic Chemistry" 
+                      <label className="text-sm font-medium">
+                        Course Name *
+                      </label>
+                      <Input
+                        value={newCourse.name}
+                        onChange={(e) =>
+                          setNewCourse((p) => ({ ...p, name: e.target.value }))
+                        }
+                        placeholder="e.g., General Physics, Organic Chemistry"
                       />
                     </div>
-                    <Button onClick={addCourse} disabled={addingCourse} className="w-full">
-                      {addingCourse ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Plus className="w-4 h-4 mr-2" />}
-                      {addingCourse ? 'Adding...' : 'Add Course'}
+                    <Button
+                      onClick={addCourse}
+                      disabled={addingCourse}
+                      className="w-full"
+                    >
+                      {addingCourse ? (
+                        <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                      ) : (
+                        <Plus className="w-4 h-4 mr-2" />
+                      )}
+                      {addingCourse ? "Adding..." : "Add Course"}
                     </Button>
                   </div>
                 </DialogContent>
@@ -1330,17 +1687,17 @@ const DeptAdminDashboard = () => {
           <CardContent>
             <div className="flex flex-wrap gap-2">
               <Button
-                variant={!selectedCourse ? 'default' : 'outline'}
+                variant={!selectedCourse ? "default" : "outline"}
                 size="sm"
-                onClick={() => setSelectedCourse('')}
+                onClick={() => setSelectedCourse("")}
                 className="mb-2"
               >
                 All Courses
               </Button>
-              {courses.map(course => (
+              {courses.map((course) => (
                 <Button
                   key={course.id}
-                  variant={selectedCourse === course.id ? 'default' : 'outline'}
+                  variant={selectedCourse === course.id ? "default" : "outline"}
                   size="sm"
                   onClick={() => setSelectedCourse(course.id)}
                   className="mb-2"
@@ -1349,7 +1706,9 @@ const DeptAdminDashboard = () => {
                 </Button>
               ))}
               {courses.length === 0 && (
-                <p className="text-muted-foreground text-sm">No courses added yet. Click "Add Course" to create one.</p>
+                <p className="text-muted-foreground text-sm">
+                  No courses added yet. Click "Add Course" to create one.
+                </p>
               )}
             </div>
           </CardContent>
@@ -1357,12 +1716,14 @@ const DeptAdminDashboard = () => {
 
         <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3 border-b pb-2">
           <div className="flex gap-1 overflow-x-auto -mx-1 px-1 scrollbar-thin">
-            {tabs.map(tab => (
+            {tabs.map((tab) => (
               <button
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id)}
                 className={`flex items-center gap-2 px-3 sm:px-4 py-2.5 text-sm font-medium border-b-2 whitespace-nowrap transition-colors ${
-                  activeTab === tab.id ? 'border-primary text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'
+                  activeTab === tab.id
+                    ? "border-primary text-primary"
+                    : "border-transparent text-muted-foreground hover:text-foreground"
                 }`}
               >
                 <tab.icon className="w-4 h-4" /> {tab.label}
@@ -1370,52 +1731,103 @@ const DeptAdminDashboard = () => {
             ))}
           </div>
           <div className="flex flex-wrap gap-2">
-            <Button size="sm" variant="default" onClick={() => { setQrCourseId(selectedCourse || ''); setShowQrDialog(true); }}>
-              <QrCode className="w-4 h-4 sm:mr-1" /> <span className="hidden sm:inline">Live QR Session</span><span className="sm:hidden">QR</span>
+            <Button
+              size="sm"
+              variant="default"
+              onClick={() => {
+                setQrCourseId(selectedCourse || "");
+                setShowQrDialog(true);
+              }}
+            >
+              <QrCode className="w-4 h-4 sm:mr-1" />{" "}
+              <span className="hidden sm:inline">Live QR Session</span>
+              <span className="sm:hidden">QR</span>
             </Button>
-            <Button size="sm" variant="outline" onClick={provisionStudentLogins} disabled={provisioningAuth}>
-              {provisioningAuth ? <Loader2 className="w-4 h-4 sm:mr-1 animate-spin" /> : <KeyRound className="w-4 h-4 sm:mr-1" />}
-              <span className="hidden sm:inline">Create Student Logins</span><span className="sm:hidden">Create</span>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={provisionStudentLogins}
+              disabled={provisioningAuth}
+            >
+              {provisioningAuth ? (
+                <Loader2 className="w-4 h-4 sm:mr-1 animate-spin" />
+              ) : (
+                <KeyRound className="w-4 h-4 sm:mr-1" />
+              )}
+              <span className="hidden sm:inline">Create Student Logins</span>
+              <span className="sm:hidden">Create</span>
             </Button>
-            <Button size="sm" variant="outline" onClick={resetStudentLogins} disabled={resettingLogins}>
-              {resettingLogins ? <Loader2 className="w-4 h-4 sm:mr-1 animate-spin" /> : <KeyRound className="w-4 h-4 sm:mr-1" />}
-              <span className="hidden sm:inline">Reset Login Lock</span><span className="sm:hidden">Reset</span>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={resetStudentLogins}
+              disabled={resettingLogins}
+            >
+              {resettingLogins ? (
+                <Loader2 className="w-4 h-4 sm:mr-1 animate-spin" />
+              ) : (
+                <KeyRound className="w-4 h-4 sm:mr-1" />
+              )}
+              <span className="hidden sm:inline">Reset Login Lock</span>
+              <span className="sm:hidden">Reset</span>
             </Button>
             <SheetsActions
               busy={sheetsBusy}
               size="sm"
-              onExport={() => pushToGoogleSheets('export_all')}
-              onSync={() => pushToGoogleSheets('sync_unsynced')}
+              onExport={() => pushToGoogleSheets("export_all")}
+              onSync={() => pushToGoogleSheets("sync_unsynced")}
             />
             <SheetsSettingsDialog />
           </div>
         </div>
 
-        <Dialog open={showQrDialog} onOpenChange={(o) => { setShowQrDialog(o); if (!o) { setQrSession(null); } }}>
+        <Dialog
+          open={showQrDialog}
+          onOpenChange={(o) => {
+            setShowQrDialog(o);
+            if (!o) {
+              setQrSession(null);
+            }
+          }}
+        >
           <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
-
-            <DialogHeader><DialogTitle>Live QR Attendance Session</DialogTitle></DialogHeader>
+            <DialogHeader>
+              <DialogTitle>Live QR Attendance Session</DialogTitle>
+            </DialogHeader>
             {!qrSession ? (
               <div className="space-y-3 pt-2">
                 <div>
                   <label className="text-sm font-medium">Course</label>
                   <Select value={qrCourseId} onValueChange={setQrCourseId}>
-                    <SelectTrigger><SelectValue placeholder="Pick a course" /></SelectTrigger>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Pick a course" />
+                    </SelectTrigger>
                     <SelectContent>
-                      {courses.map(c => (
-                        <SelectItem key={c.id} value={c.id}>{c.code} - {c.name}</SelectItem>
+                      {courses.map((c) => (
+                        <SelectItem key={c.id} value={c.id}>
+                          {c.code} - {c.name}
+                        </SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
                 </div>
                 <div>
                   <label className="text-sm font-medium">Date</label>
-                  <Input type="date" value={qrDate} onChange={e => setQrDate(e.target.value)} />
+                  <Input
+                    type="date"
+                    value={qrDate}
+                    onChange={(e) => setQrDate(e.target.value)}
+                  />
                 </div>
                 <div>
                   <label className="text-sm font-medium">Duration</label>
-                  <Select value={String(qrDurationMin)} onValueChange={v => setQrDurationMin(Number(v))}>
-                    <SelectTrigger><SelectValue /></SelectTrigger>
+                  <Select
+                    value={String(qrDurationMin)}
+                    onValueChange={(v) => setQrDurationMin(Number(v))}
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="5">5 minutes</SelectItem>
                       <SelectItem value="15">15 minutes</SelectItem>
@@ -1428,65 +1840,137 @@ const DeptAdminDashboard = () => {
 
                 <div className="space-y-2">
                   <div className="flex items-center justify-between">
-                    <label className="text-sm font-medium">Class location (tap map to set)</label>
-                    <Button type="button" size="sm" variant="outline" onClick={useMyLocation}>Use my location</Button>
+                    <label className="text-sm font-medium">
+                      Class location (tap map to set)
+                    </label>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      onClick={useMyLocation}
+                    >
+                      Use my location
+                    </Button>
                   </div>
-                  <LocationPicker lat={qrLat} lng={qrLng} radius={qrRadius} onChange={(la, ln) => { setQrLat(la); setQrLng(ln); }} />
+                  <LocationPicker
+                    lat={qrLat}
+                    lng={qrLng}
+                    radius={qrRadius}
+                    onChange={(la, ln) => {
+                      setQrLat(la);
+                      setQrLng(ln);
+                    }}
+                  />
                   <div className="flex items-center gap-2">
-                    <label className="text-sm font-medium whitespace-nowrap">Radius (m)</label>
-                    <Input type="number" min={10} max={5000} value={qrRadius} onChange={e => setQrRadius(Math.max(10, Number(e.target.value) || 100))} />
+                    <label className="text-sm font-medium whitespace-nowrap">
+                      Radius (m)
+                    </label>
+                    <Input
+                      type="number"
+                      min={10}
+                      max={5000}
+                      value={qrRadius}
+                      onChange={(e) =>
+                        setQrRadius(Math.max(10, Number(e.target.value) || 100))
+                      }
+                    />
                   </div>
                   {qrLat != null && qrLng != null && (
-                    <p className="text-xs text-muted-foreground">Pin: {qrLat.toFixed(5)}, {qrLng.toFixed(5)} · radius {qrRadius}m</p>
+                    <p className="text-xs text-muted-foreground">
+                      Pin: {qrLat.toFixed(5)}, {qrLng.toFixed(5)} · radius{" "}
+                      {qrRadius}m
+                    </p>
                   )}
                 </div>
 
-                <Button onClick={createQrSession} disabled={qrCreating || !qrCourseId || qrLat == null} className="w-full">
-                  {qrCreating ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <QrCode className="w-4 h-4 mr-2" />}
+                <Button
+                  onClick={createQrSession}
+                  disabled={qrCreating || !qrCourseId || qrLat == null}
+                  className="w-full"
+                >
+                  {qrCreating ? (
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  ) : (
+                    <QrCode className="w-4 h-4 mr-2" />
+                  )}
                   Start session
                 </Button>
                 <p className="text-xs text-muted-foreground">
-                  Students must be within the radius of the pinned location to mark attendance.
+                  Students must be within the radius of the pinned location to
+                  mark attendance.
                 </p>
               </div>
-            ) : (() => {
-              const scanUrl = `${window.location.origin}/scan?token=${qrSession.token}${rotatingCode ? `&c=${rotatingCode}` : ''}`;
-              const remainingMs = new Date(qrSession.expires_at).getTime() - now;
-              const remaining = Math.max(0, Math.floor(remainingMs / 1000));
-              const mm = Math.floor(remaining / 60).toString().padStart(2, '0');
-              const ss = (remaining % 60).toString().padStart(2, '0');
-              const expired = remainingMs <= 0;
-              return (
-                <div className="space-y-3 pt-2 text-center">
-                  <div className="bg-white p-4 rounded-lg inline-block mx-auto">
-                    <QRCodeCanvas value={scanUrl} size={240} includeMargin />
-                  </div>
-                  {rotatingCode && (
-                    <p className="text-sm">Rotating code: <span className="font-mono font-bold tracking-widest">{rotatingCode}</span></p>
-                  )}
-                  <p className="text-2xl font-mono font-bold">{expired ? 'EXPIRED' : `${mm}:${ss}`}</p>
-                  <p className="text-xs text-muted-foreground break-all">{scanUrl}</p>
+            ) : (
+              (() => {
+                const scanUrl = `${window.location.origin}/scan?token=${qrSession.token}${rotatingCode ? `&c=${rotatingCode}` : ""}`;
+                const remainingMs =
+                  new Date(qrSession.expires_at).getTime() - now;
+                const remaining = Math.max(0, Math.floor(remainingMs / 1000));
+                const mm = Math.floor(remaining / 60)
+                  .toString()
+                  .padStart(2, "0");
+                const ss = (remaining % 60).toString().padStart(2, "0");
+                const expired = remainingMs <= 0;
+                return (
+                  <div className="space-y-3 pt-2 text-center">
+                    <div className="bg-white p-4 rounded-lg inline-block mx-auto">
+                      <QRCodeCanvas value={scanUrl} size={240} includeMargin />
+                    </div>
+                    {rotatingCode && (
+                      <p className="text-sm">
+                        Rotating code:{" "}
+                        <span className="font-mono font-bold tracking-widest">
+                          {rotatingCode}
+                        </span>
+                      </p>
+                    )}
+                    <p className="text-2xl font-mono font-bold">
+                      {expired ? "EXPIRED" : `${mm}:${ss}`}
+                    </p>
+                    <p className="text-xs text-muted-foreground break-all">
+                      {scanUrl}
+                    </p>
 
-                  <div className="flex flex-wrap gap-2 justify-center">
-                    <Button size="sm" variant="outline" onClick={() => { navigator.clipboard.writeText(scanUrl); toast.success('Link copied'); }}>
-                      <Copy className="w-4 h-4 mr-1" /> Copy link
-                    </Button>
-                    <Button size="sm" variant="outline" onClick={endQrSession}>End session</Button>
-                    <Button size="sm" variant="destructive" onClick={endAndMarkAbsent} disabled={qrEnding}>
-                      {qrEnding ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <XCircle className="w-4 h-4 mr-1" />}
-                      End & mark absent
-                    </Button>
+                    <div className="flex flex-wrap gap-2 justify-center">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => {
+                          navigator.clipboard.writeText(scanUrl);
+                          toast.success("Link copied");
+                        }}
+                      >
+                        <Copy className="w-4 h-4 mr-1" /> Copy link
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={endQrSession}
+                      >
+                        End session
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="destructive"
+                        onClick={endAndMarkAbsent}
+                        disabled={qrEnding}
+                      >
+                        {qrEnding ? (
+                          <Loader2 className="w-4 h-4 mr-1 animate-spin" />
+                        ) : (
+                          <XCircle className="w-4 h-4 mr-1" />
+                        )}
+                        End & mark absent
+                      </Button>
+                    </div>
                   </div>
-                </div>
-              );
-            })()}
+                );
+              })()
+            )}
           </DialogContent>
         </Dialog>
 
-
-
-
-        {activeTab === 'mark' && (
+        {activeTab === "mark" && (
           <Card>
             <CardHeader>
               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
@@ -1494,21 +1978,32 @@ const DeptAdminDashboard = () => {
                   <CardTitle className="text-lg">Mark Attendance</CardTitle>
                   <p className="text-sm text-muted-foreground mt-0.5">
                     Department: {departmentName}
-                    {selectedCourse && courses.find(c => c.id === selectedCourse) && (
-                      <span className="ml-2 font-semibold">
-                        | Course: {courses.find(c => c.id === selectedCourse)?.code} - {courses.find(c => c.id === selectedCourse)?.name}
-                      </span>
-                    )}
+                    {selectedCourse &&
+                      courses.find((c) => c.id === selectedCourse) && (
+                        <span className="ml-2 font-semibold">
+                          | Course:{" "}
+                          {courses.find((c) => c.id === selectedCourse)?.code} -{" "}
+                          {courses.find((c) => c.id === selectedCourse)?.name}
+                        </span>
+                      )}
                   </p>
                 </div>
                 <div className="flex items-center gap-2 flex-wrap">
                   <Button variant="outline" size="sm" onClick={addDateColumn}>
                     <Plus className="w-4 h-4 mr-1" /> Add Date
                   </Button>
-                  <Button variant="outline" onClick={exportCSV} disabled={students.length === 0}>
+                  <Button
+                    variant="outline"
+                    onClick={exportCSV}
+                    disabled={students.length === 0}
+                  >
                     <Download className="w-4 h-4 mr-1" /> Export CSV
                   </Button>
-                  <Button variant="outline" onClick={exportExcel} disabled={students.length === 0}>
+                  <Button
+                    variant="outline"
+                    onClick={exportExcel}
+                    disabled={students.length === 0}
+                  >
                     <Download className="w-4 h-4 mr-1" /> Excel
                   </Button>
                   {/* <SheetsActions
@@ -1519,82 +2014,132 @@ const DeptAdminDashboard = () => {
                   <Button onClick={sharePDF} disabled={history.length === 0}>
                     <Download className="w-4 h-4 mr-1" /> Share PDF
                   </Button>
-                  <Dialog open={showShareDialog} onOpenChange={setShowShareDialog}>
+                  <Dialog
+                    open={showShareDialog}
+                    onOpenChange={setShowShareDialog}
+                  >
                     <DialogContent>
-                      <DialogHeader><DialogTitle>Share Attendance PDF</DialogTitle></DialogHeader>
+                      <DialogHeader>
+                        <DialogTitle>Share Attendance PDF</DialogTitle>
+                      </DialogHeader>
                       <div className="space-y-2 pt-2">
-                        <p className="text-sm text-muted-foreground">{shareFileName}</p>
+                        <p className="text-sm text-muted-foreground">
+                          {shareFileName}
+                        </p>
                         <Button className="w-full" onClick={downloadPDF}>
                           <Download className="w-4 h-4 mr-2" /> Download PDF
                         </Button>
-                        <Button variant="outline" className="w-full" onClick={shareViaNative}>
+                        <Button
+                          variant="outline"
+                          className="w-full"
+                          onClick={shareViaNative}
+                        >
                           Share via device (if supported)
                         </Button>
-                        <Button variant="outline" className="w-full" onClick={shareViaWhatsApp}>
+                        <Button
+                          variant="outline"
+                          className="w-full"
+                          onClick={shareViaWhatsApp}
+                        >
                           WhatsApp (downloads PDF + opens chat)
                         </Button>
-                        <Button variant="outline" className="w-full" onClick={shareViaTelegram}>
+                        <Button
+                          variant="outline"
+                          className="w-full"
+                          onClick={shareViaTelegram}
+                        >
                           Telegram (downloads PDF + opens chat)
                         </Button>
-                        <Button variant="outline" className="w-full" onClick={shareViaEmail}>
+                        <Button
+                          variant="outline"
+                          className="w-full"
+                          onClick={shareViaEmail}
+                        >
                           Email (downloads PDF + opens mail)
                         </Button>
                         <p className="text-xs text-muted-foreground pt-2">
-                          Tip: native sharing is blocked inside the preview iframe. Open the published app on your phone for one-tap sharing, or download here and attach manually.
+                          Tip: native sharing is blocked inside the preview
+                          iframe. Open the published app on your phone for
+                          one-tap sharing, or download here and attach manually.
                         </p>
                       </div>
                     </DialogContent>
                   </Dialog>
-                  <Button 
-                    onClick={saveAttendance} 
-                    disabled={syncingAttendance || pendingSyncCount === 0 || connectionStatus === 'offline'}
-                    variant={pendingSyncCount > 0 ? 'default' : 'outline'}
+                  <Button
+                    onClick={saveAttendance}
+                    disabled={
+                      syncingAttendance ||
+                      pendingSyncCount === 0 ||
+                      connectionStatus === "offline"
+                    }
+                    variant={pendingSyncCount > 0 ? "default" : "outline"}
                   >
                     {syncingAttendance ? (
                       <Loader2 className="w-4 h-4 mr-1 animate-spin" />
                     ) : (
                       <Save className="w-4 h-4 mr-1" />
                     )}
-                    {syncingAttendance ? 'Syncing...' : `Save All (${pendingSyncCount})`}
+                    {syncingAttendance
+                      ? "Syncing..."
+                      : `Save All (${pendingSyncCount})`}
                   </Button>
                   {failedSyncCount > 0 && (
-                    <Button onClick={syncAttendanceToDatabase} variant="destructive" size="sm">
-                      <RefreshCw className="w-4 h-4 mr-1" /> Retry Failed ({failedSyncCount})
+                    <Button
+                      onClick={syncAttendanceToDatabase}
+                      variant="destructive"
+                      size="sm"
+                    >
+                      <RefreshCw className="w-4 h-4 mr-1" /> Retry Failed (
+                      {failedSyncCount})
                     </Button>
                   )}
                 </div>
               </div>
-              
+
               {pendingSyncCount > 0 && (
                 <Badge className="mt-2 bg-yellow-100 text-yellow-800">
                   <Database className="w-3 h-3 mr-1" />
-                  {pendingSyncCount} unsynced record{pendingSyncCount !== 1 ? 's' : ''}
+                  {pendingSyncCount} unsynced record
+                  {pendingSyncCount !== 1 ? "s" : ""}
                 </Badge>
               )}
-              
+
               {failedSyncCount > 0 && (
                 <Badge className="mt-2 bg-red-100 text-red-800 ml-2">
                   <AlertCircle className="w-3 h-3 mr-1" />
-                  {failedSyncCount} failed record{failedSyncCount !== 1 ? 's' : ''}
+                  {failedSyncCount} failed record
+                  {failedSyncCount !== 1 ? "s" : ""}
                 </Badge>
               )}
-              
-              {connectionStatus === 'offline' && (
+
+              {connectionStatus === "offline" && (
                 <Badge className="mt-2 bg-red-100 text-red-800">
                   <WifiOff className="w-3 h-3 mr-1" />
-                  You are offline. Changes will be saved locally and synced when you reconnect.
+                  You are offline. Changes will be saved locally and synced when
+                  you reconnect.
                 </Badge>
               )}
-              
-              <p className="text-xs text-muted-foreground mt-2">Click a cell to toggle: empty → <Check className="inline w-3 h-3 text-green-600" /> (Present) → <X className="inline w-3 h-3 text-red-600" /> (Absent) → empty</p>
-              <p className="text-xs text-muted-foreground">Changes are saved locally and will be synced when you click "Save All"</p>
+
+              <p className="text-xs text-muted-foreground mt-2">
+                Click a cell to toggle: empty →{" "}
+                <Check className="inline w-3 h-3 text-green-600" /> (Present) →{" "}
+                <X className="inline w-3 h-3 text-red-600" /> (Absent) → empty
+              </p>
+              <p className="text-xs text-muted-foreground">
+                Changes are saved locally and will be synced when you click
+                "Save All"
+              </p>
             </CardHeader>
             <CardContent>
               {students.length === 0 ? (
                 <div className="text-center py-8">
                   <Users className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
                   <p className="text-muted-foreground">No students yet.</p>
-                  <Button variant="link" onClick={() => setActiveTab('students')} className="mt-2">
+                  <Button
+                    variant="link"
+                    onClick={() => setActiveTab("students")}
+                    className="mt-2"
+                  >
                     Go to Students tab to add some
                   </Button>
                 </div>
@@ -1605,28 +2150,39 @@ const DeptAdminDashboard = () => {
                       <TableRow>
                         <TableHead className="w-12 text-center">S/N</TableHead>
                         <TableHead className="min-w-[150px]">Name</TableHead>
-                        <TableHead className="w-16 text-center">Gender</TableHead>
-                        <TableHead className="min-w-[130px]">Matric No</TableHead>
-                        <TableHead className="min-w-[120px]">Department</TableHead>
+                        <TableHead className="w-16 text-center">
+                          Gender
+                        </TableHead>
+                        <TableHead className="min-w-[130px]">
+                          Matric No
+                        </TableHead>
+                        <TableHead className="min-w-[120px]">
+                          Department
+                        </TableHead>
                         {dateColumns.map((date, i) => (
-                          <TableHead key={i} className="text-center min-w-[110px]">
+                          <TableHead
+                            key={i}
+                            className="text-center min-w-[110px]"
+                          >
                             <div className="flex flex-col items-center gap-1">
                               <Input
                                 type="date"
                                 value={date}
-                                onChange={e => updateDateColumn(i, e.target.value)}
+                                onChange={(e) =>
+                                  updateDateColumn(i, e.target.value)
+                                }
                                 className="h-7 text-xs w-[120px] px-1"
                               />
                               <div className="flex items-center gap-1">
                                 <button
-                                  onClick={() => markAllForDate(date, 'P')}
+                                  onClick={() => markAllForDate(date, "P")}
                                   className="text-[10px] px-1.5 py-0.5 rounded bg-green-100 text-green-700 hover:bg-green-200 dark:bg-green-900 dark:text-green-300 dark:hover:bg-green-800 flex items-center gap-0.5"
                                   title="Mark all present"
                                 >
                                   <CheckCheck className="w-3 h-3" /> All P
                                 </button>
                                 <button
-                                  onClick={() => markAllForDate(date, 'A')}
+                                  onClick={() => markAllForDate(date, "A")}
                                   className="text-[10px] px-1.5 py-0.5 rounded bg-red-100 text-red-700 hover:bg-red-200 dark:bg-red-900 dark:text-red-300 dark:hover:bg-red-800 flex items-center gap-0.5"
                                   title="Mark all absent"
                                 >
@@ -1634,40 +2190,69 @@ const DeptAdminDashboard = () => {
                                 </button>
                               </div>
                               {dateColumns.length > 1 && (
-                                <button onClick={() => removeDateColumn(i)} className="text-[10px] text-destructive hover:underline">
+                                <button
+                                  onClick={() => removeDateColumn(i)}
+                                  className="text-[10px] text-destructive hover:underline"
+                                >
                                   remove
                                 </button>
                               )}
                             </div>
                           </TableHead>
                         ))}
-                        <TableHead className="w-20 text-center">Remark</TableHead>
+                        <TableHead className="w-20 text-center">
+                          Remark
+                        </TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
                       {students.map((student, idx) => (
                         <TableRow key={student.id}>
-                          <TableCell className="text-center font-medium">{idx + 1}</TableCell>
-                          <TableCell className="font-medium">{student.name}</TableCell>
-                          <TableCell className="text-center text-sm">{student.gender ? student.gender.charAt(0) : ''}</TableCell>
-                          <TableCell className="text-sm">{student.matric_no || ''}</TableCell>
-                          <TableCell className="text-sm">{departmentName}</TableCell>
+                          <TableCell className="text-center font-medium">
+                            {idx + 1}
+                          </TableCell>
+                          <TableCell className="font-medium">
+                            {student.name}
+                          </TableCell>
+                          <TableCell className="text-center text-sm">
+                            {student.gender ? student.gender.charAt(0) : ""}
+                          </TableCell>
+                          <TableCell className="text-sm">
+                            {student.matric_no || ""}
+                          </TableCell>
+                          <TableCell className="text-sm">
+                            {departmentName}
+                          </TableCell>
                           {dateColumns.map((date, i) => {
-                            const val = grid[student.id]?.[date] || '';
+                            const val = grid[student.id]?.[date] || "";
                             const isPending = localAttendance.some(
-                              item => item.studentId === student.id && item.date === date && !item.synced
+                              (item) =>
+                                item.studentId === student.id &&
+                                item.date === date &&
+                                !item.synced,
                             );
                             const hasError = localAttendance.some(
-                              item => item.studentId === student.id && item.date === date && item.error
+                              (item) =>
+                                item.studentId === student.id &&
+                                item.date === date &&
+                                item.error,
                             );
                             return (
                               <TableCell key={i} className="text-center p-1">
                                 <button
                                   onClick={() => toggleCell(student.id, date)}
                                   className={`w-full h-8 rounded text-xs font-bold transition-colors flex items-center justify-center relative ${cellStyles[val]}`}
-                                  disabled={connectionStatus === 'offline' && !isPending}
+                                  disabled={
+                                    connectionStatus === "offline" && !isPending
+                                  }
                                 >
-                                  {val === 'P' ? <Check className="w-4 h-4" /> : val === 'A' ? <X className="w-4 h-4" /> : '—'}
+                                  {val === "P" ? (
+                                    <Check className="w-4 h-4" />
+                                  ) : val === "A" ? (
+                                    <X className="w-4 h-4" />
+                                  ) : (
+                                    "—"
+                                  )}
                                   {isPending && !hasError && (
                                     <span className="absolute -top-1 -right-1 w-2 h-2 bg-yellow-500 rounded-full animate-pulse"></span>
                                   )}
@@ -1678,7 +2263,9 @@ const DeptAdminDashboard = () => {
                               </TableCell>
                             );
                           })}
-                          <TableCell className="text-center text-sm text-muted-foreground">—</TableCell>
+                          <TableCell className="text-center text-sm text-muted-foreground">
+                            —
+                          </TableCell>
                         </TableRow>
                       ))}
                     </TableBody>
@@ -1689,32 +2276,66 @@ const DeptAdminDashboard = () => {
           </Card>
         )}
 
-        {activeTab === 'students' && (
+        {activeTab === "students" && (
           <Card>
             <CardHeader>
               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                 <CardTitle className="text-lg">Student Details</CardTitle>
                 <div className="flex items-center gap-2">
-                  <input ref={fileInputRef} type="file" accept=".csv" onChange={handleCSVImport} className="hidden" />
-                  <Button variant="outline" onClick={() => fileInputRef.current?.click()} disabled={importing}>
-                    {importing ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <Upload className="w-4 h-4 mr-1" />}
-                    {importing ? 'Importing...' : 'Import CSV'}
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept=".csv"
+                    onChange={handleCSVImport}
+                    className="hidden"
+                  />
+                  <Button
+                    variant="outline"
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={importing}
+                  >
+                    {importing ? (
+                      <Loader2 className="w-4 h-4 mr-1 animate-spin" />
+                    ) : (
+                      <Upload className="w-4 h-4 mr-1" />
+                    )}
+                    {importing ? "Importing..." : "Import CSV"}
                   </Button>
                   <Dialog open={showAddDialog} onOpenChange={setShowAddDialog}>
                     <DialogTrigger asChild>
-                      <Button><Plus className="w-4 h-4 mr-1" /> Add Student</Button>
+                      <Button>
+                        <Plus className="w-4 h-4 mr-1" /> Add Student
+                      </Button>
                     </DialogTrigger>
                     <DialogContent>
-                      <DialogHeader><DialogTitle>Add New Student</DialogTitle></DialogHeader>
+                      <DialogHeader>
+                        <DialogTitle>Add New Student</DialogTitle>
+                      </DialogHeader>
                       <div className="space-y-4 pt-2">
                         <div>
                           <label className="text-sm font-medium">Name *</label>
-                          <Input value={newStudent.name} onChange={e => setNewStudent(p => ({ ...p, name: e.target.value }))} placeholder="Full name" />
+                          <Input
+                            value={newStudent.name}
+                            onChange={(e) =>
+                              setNewStudent((p) => ({
+                                ...p,
+                                name: e.target.value,
+                              }))
+                            }
+                            placeholder="Full name"
+                          />
                         </div>
                         <div>
                           <label className="text-sm font-medium">Gender</label>
-                          <Select value={newStudent.gender} onValueChange={v => setNewStudent(p => ({ ...p, gender: v }))}>
-                            <SelectTrigger><SelectValue placeholder="Select gender" /></SelectTrigger>
+                          <Select
+                            value={newStudent.gender}
+                            onValueChange={(v) =>
+                              setNewStudent((p) => ({ ...p, gender: v }))
+                            }
+                          >
+                            <SelectTrigger>
+                              <SelectValue placeholder="Select gender" />
+                            </SelectTrigger>
                             <SelectContent>
                               <SelectItem value="Male">Male</SelectItem>
                               <SelectItem value="Female">Female</SelectItem>
@@ -1722,32 +2343,62 @@ const DeptAdminDashboard = () => {
                           </Select>
                         </div>
                         <div>
-                          <label className="text-sm font-medium">Matric No</label>
-                          <Input value={newStudent.matric_no} onChange={e => setNewStudent(p => ({ ...p, matric_no: e.target.value }))} placeholder="e.g., MAT/2024/001" />
+                          <label className="text-sm font-medium">
+                            Matric No
+                          </label>
+                          <Input
+                            value={newStudent.matric_no}
+                            onChange={(e) =>
+                              setNewStudent((p) => ({
+                                ...p,
+                                matric_no: e.target.value,
+                              }))
+                            }
+                            placeholder="e.g., MAT/2024/001"
+                          />
                         </div>
-                        <Button onClick={addStudent} disabled={addingStudent} className="w-full">
-                          {addingStudent ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Plus className="w-4 h-4 mr-2" />}
-                          {addingStudent ? 'Adding...' : 'Add Student'}
+                        <Button
+                          onClick={addStudent}
+                          disabled={addingStudent}
+                          className="w-full"
+                        >
+                          {addingStudent ? (
+                            <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                          ) : (
+                            <Plus className="w-4 h-4 mr-2" />
+                          )}
+                          {addingStudent ? "Adding..." : "Add Student"}
                         </Button>
                       </div>
                     </DialogContent>
                   </Dialog>
                   {Object.keys(studentEdits).length > 0 && (
-                    <Button onClick={saveStudentDetails} disabled={savingStudents}>
-                      {savingStudents ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <Save className="w-4 h-4 mr-1" />}
+                    <Button
+                      onClick={saveStudentDetails}
+                      disabled={savingStudents}
+                    >
+                      {savingStudents ? (
+                        <Loader2 className="w-4 h-4 mr-1 animate-spin" />
+                      ) : (
+                        <Save className="w-4 h-4 mr-1" />
+                      )}
                       Save Changes
                     </Button>
                   )}
                 </div>
               </div>
-              <p className="text-xs text-muted-foreground mt-1">CSV format: name, gender, matric_no (header row required)</p>
+              <p className="text-xs text-muted-foreground mt-1">
+                CSV format: name, gender, matric_no (header row required)
+              </p>
             </CardHeader>
             <CardContent>
               {students.length === 0 ? (
                 <div className="text-center py-8">
                   <Users className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
                   <p className="text-muted-foreground">No students yet.</p>
-                  <p className="text-sm text-muted-foreground mt-1">Add them manually or import a CSV file.</p>
+                  <p className="text-sm text-muted-foreground mt-1">
+                    Add them manually or import a CSV file.
+                  </p>
                 </div>
               ) : (
                 <div className="overflow-x-auto">
@@ -1761,16 +2412,33 @@ const DeptAdminDashboard = () => {
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {students.map(student => {
+                      {students.map((student) => {
                         const edits = studentEdits[student.id] || {};
                         return (
                           <TableRow key={student.id}>
                             <TableCell>
-                              <Input value={edits.name ?? student.name} onChange={(e) => updateStudentField(student.id, 'name', e.target.value)} className="min-w-[140px]" />
+                              <Input
+                                value={edits.name ?? student.name}
+                                onChange={(e) =>
+                                  updateStudentField(
+                                    student.id,
+                                    "name",
+                                    e.target.value,
+                                  )
+                                }
+                                className="min-w-[140px]"
+                              />
                             </TableCell>
                             <TableCell>
-                              <Select value={edits.gender ?? student.gender ?? ''} onValueChange={(v) => updateStudentField(student.id, 'gender', v)}>
-                                <SelectTrigger className="w-[120px]"><SelectValue placeholder="Select" /></SelectTrigger>
+                              <Select
+                                value={edits.gender ?? student.gender ?? ""}
+                                onValueChange={(v) =>
+                                  updateStudentField(student.id, "gender", v)
+                                }
+                              >
+                                <SelectTrigger className="w-[120px]">
+                                  <SelectValue placeholder="Select" />
+                                </SelectTrigger>
                                 <SelectContent>
                                   <SelectItem value="Male">Male</SelectItem>
                                   <SelectItem value="Female">Female</SelectItem>
@@ -1778,7 +2446,20 @@ const DeptAdminDashboard = () => {
                               </Select>
                             </TableCell>
                             <TableCell>
-                              <Input value={edits.matric_no ?? student.matric_no ?? ''} onChange={(e) => updateStudentField(student.id, 'matric_no', e.target.value)} placeholder="e.g., MAT/2024/001" className="min-w-[160px]" />
+                              <Input
+                                value={
+                                  edits.matric_no ?? student.matric_no ?? ""
+                                }
+                                onChange={(e) =>
+                                  updateStudentField(
+                                    student.id,
+                                    "matric_no",
+                                    e.target.value,
+                                  )
+                                }
+                                placeholder="e.g., MAT/2024/001"
+                                className="min-w-[160px]"
+                              />
                             </TableCell>
                             <TableCell>
                               <div className="flex items-center gap-1">
@@ -1786,14 +2467,28 @@ const DeptAdminDashboard = () => {
                                   variant="ghost"
                                   size="icon"
                                   title="Reset one-time login lock"
-                                  onClick={() => resetSingleStudentLogin(student.id, student.name)}
+                                  onClick={() =>
+                                    resetSingleStudentLogin(
+                                      student.id,
+                                      student.name,
+                                    )
+                                  }
                                   disabled={resettingStudentId === student.id}
                                 >
-                                  {resettingStudentId === student.id
-                                    ? <Loader2 className="w-4 h-4 animate-spin" />
-                                    : <KeyRound className="w-4 h-4" />}
+                                  {resettingStudentId === student.id ? (
+                                    <Loader2 className="w-4 h-4 animate-spin" />
+                                  ) : (
+                                    <KeyRound className="w-4 h-4" />
+                                  )}
                                 </Button>
-                                <Button variant="ghost" size="icon" onClick={() => deleteStudent(student.id, student.name)} className="text-destructive hover:text-destructive">
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  onClick={() =>
+                                    deleteStudent(student.id, student.name)
+                                  }
+                                  className="text-destructive hover:text-destructive"
+                                >
                                   <Trash2 className="w-4 h-4" />
                                 </Button>
                               </div>
@@ -1809,20 +2504,45 @@ const DeptAdminDashboard = () => {
           </Card>
         )}
 
-        {activeTab === 'history' && (
+        {activeTab === "history" && (
           <Card>
             <CardHeader>
               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                 <div>
                   <CardTitle className="text-lg">Attendance History</CardTitle>
                   <p className="text-xs text-muted-foreground mt-1">
-                    {historySource === 'sheet'
-                      ? <>Source: <span className="font-medium">Google Sheet</span>{sheetUrl && <> · <a href={sheetUrl} target="_blank" rel="noreferrer" className="underline">Open sheet</a></>}</>
-                      : <>Source: <span className="font-medium">Local database</span></>}
+                    {historySource === "sheet" ? (
+                      <>
+                        Source:{" "}
+                        <span className="font-medium">Google Sheet</span>
+                        {sheetUrl && (
+                          <>
+                            {" "}
+                            ·{" "}
+                            <a
+                              href={sheetUrl}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="underline"
+                            >
+                              Open sheet
+                            </a>
+                          </>
+                        )}
+                      </>
+                    ) : (
+                      <>
+                        Source:{" "}
+                        <span className="font-medium">Local database</span>
+                      </>
+                    )}
                   </p>
                 </div>
                 <div className="flex flex-wrap gap-2 items-center">
-                  <Select value={historySource} onValueChange={(v: any) => setHistorySource(v)}>
+                  <Select
+                    value={historySource}
+                    onValueChange={(v: any) => setHistorySource(v)}
+                  >
                     <SelectTrigger className="w-[170px]">
                       <SelectValue />
                     </SelectTrigger>
@@ -1831,9 +2551,18 @@ const DeptAdminDashboard = () => {
                       <SelectItem value="local">Local database</SelectItem>
                     </SelectContent>
                   </Select>
-                  {historySource === 'sheet' && (
-                    <Button size="sm" variant="outline" onClick={fetchSheetHistory} disabled={sheetHistoryLoading}>
-                      {sheetHistoryLoading ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <RefreshCw className="w-4 h-4 mr-1" />}
+                  {historySource === "sheet" && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={fetchSheetHistory}
+                      disabled={sheetHistoryLoading}
+                    >
+                      {sheetHistoryLoading ? (
+                        <Loader2 className="w-4 h-4 mr-1 animate-spin" />
+                      ) : (
+                        <RefreshCw className="w-4 h-4 mr-1" />
+                      )}
                       Refresh
                     </Button>
                   )}
@@ -1843,8 +2572,12 @@ const DeptAdminDashboard = () => {
                     onClick={deleteAllHistory}
                     disabled={deletingHistory || history.length === 0}
                   >
-                    {deletingHistory ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <Trash2 className="w-4 h-4 mr-1" />}
-                    {deletingHistory ? 'Deleting...' : 'Delete All History'}
+                    {deletingHistory ? (
+                      <Loader2 className="w-4 h-4 mr-1 animate-spin" />
+                    ) : (
+                      <Trash2 className="w-4 h-4 mr-1" />
+                    )}
+                    {deletingHistory ? "Deleting..." : "Delete All History"}
                   </Button>
                 </div>
               </div>
@@ -1855,17 +2588,20 @@ const DeptAdminDashboard = () => {
                   <Input
                     placeholder="Search by name or matric no..."
                     value={searchQuery}
-                    onChange={e => setSearchQuery(e.target.value)}
+                    onChange={(e) => setSearchQuery(e.target.value)}
                     className="pl-8"
                   />
                 </div>
-                <Select value={historyCourseFilter} onValueChange={setHistoryCourseFilter}>
+                <Select
+                  value={historyCourseFilter}
+                  onValueChange={setHistoryCourseFilter}
+                >
                   <SelectTrigger className="w-full sm:w-[180px]">
                     <SelectValue placeholder="Filter by course" />
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">All Courses</SelectItem>
-                    {courses.map(course => (
+                    {courses.map((course) => (
                       <SelectItem key={course.id} value={course.id}>
                         {course.code} - {course.name}
                       </SelectItem>
@@ -1886,22 +2622,36 @@ const DeptAdminDashboard = () => {
             </CardHeader>
             <CardContent>
               <div className="mb-4 grid grid-cols-2 md:grid-cols-3 gap-3">
-                {filteredStats.slice(0, 12).map(student => (
-                  <div key={student.id} className="p-3 rounded-lg border bg-muted/30">
-                    <p className="font-medium text-sm truncate" title={student.name}>{student.name}</p>
+                {filteredStats.slice(0, 12).map((student) => (
+                  <div
+                    key={student.id}
+                    className="p-3 rounded-lg border bg-muted/30"
+                  >
+                    <p
+                      className="font-medium text-sm truncate"
+                      title={student.name}
+                    >
+                      {student.name}
+                    </p>
                     {student.matric_no && (
-                      <p className="text-xs text-muted-foreground">{student.matric_no}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {student.matric_no}
+                      </p>
                     )}
                     <p className="text-xs text-muted-foreground mt-1">
                       Present: {student.present} / {student.total}
                     </p>
-                    <p className={`text-sm font-bold mt-1 ${student.percent >= 75 ? 'text-green-600' : 'text-red-500'}`}>
+                    <p
+                      className={`text-sm font-bold mt-1 ${student.percent >= 75 ? "text-green-600" : "text-red-500"}`}
+                    >
                       {student.percent.toFixed(1)}%
                     </p>
                   </div>
                 ))}
                 {filteredStats.length === 0 && (
-                  <p className="text-muted-foreground text-sm col-span-full text-center py-4">No students match your search/filter.</p>
+                  <p className="text-muted-foreground text-sm col-span-full text-center py-4">
+                    No students match your search/filter.
+                  </p>
                 )}
               </div>
               <div className="overflow-x-auto">
@@ -1919,54 +2669,73 @@ const DeptAdminDashboard = () => {
                   </TableHeader>
                   <TableBody>
                     {(() => {
-                      const source = historySource === 'sheet' ? sheetHistory : filteredHistory;
-                      const selectedCourseCode = historyCourseFilter !== 'all'
-                        ? courses.find(c => c.id === historyCourseFilter)?.code
-                        : null;
-                      const filtered = source.filter(r => {
-                        if (historyCourseFilter !== 'all') {
-                          if (historySource === 'sheet') {
-                            if (r.courses?.code !== selectedCourseCode) return false;
+                      const source =
+                        historySource === "sheet"
+                          ? sheetHistory
+                          : filteredHistory;
+                      const selectedCourseCode =
+                        historyCourseFilter !== "all"
+                          ? courses.find((c) => c.id === historyCourseFilter)
+                              ?.code
+                          : null;
+                      const filtered = source.filter((r) => {
+                        if (historyCourseFilter !== "all") {
+                          if (historySource === "sheet") {
+                            if (r.courses?.code !== selectedCourseCode)
+                              return false;
                           } else {
-                            if (r.course_id !== historyCourseFilter) return false;
+                            if (r.course_id !== historyCourseFilter)
+                              return false;
                           }
                         }
                         if (!searchQuery.trim()) return true;
                         const q = searchQuery.toLowerCase();
                         return (
-                          (r.students?.name?.toLowerCase().includes(q)) ||
-                          (r.students?.matric_no?.toLowerCase().includes(q))
+                          r.students?.name?.toLowerCase().includes(q) ||
+                          r.students?.matric_no?.toLowerCase().includes(q)
                         );
                       });
                       if (filtered.length === 0) {
                         return (
                           <TableRow>
-                            <TableCell colSpan={7} className="text-center text-muted-foreground py-8">
-                              {historySource === 'sheet'
-                                ? (sheetHistoryLoading ? 'Loading from Google Sheet...' : 'No records found in the Google Sheet for the selected course.')
-                                : historyCourseFilter !== 'all'
-                                  ? 'No attendance records for the selected course.'
-                                  : 'No attendance records yet. Start marking attendance!'}
+                            <TableCell
+                              colSpan={7}
+                              className="text-center text-muted-foreground py-8"
+                            >
+                              {historySource === "sheet"
+                                ? sheetHistoryLoading
+                                  ? "Loading from Google Sheet..."
+                                  : "No records found in the Google Sheet for the selected course."
+                                : historyCourseFilter !== "all"
+                                  ? "No attendance records for the selected course."
+                                  : "No attendance records yet. Start marking attendance!"}
                             </TableCell>
                           </TableRow>
                         );
                       }
                       return filtered.slice(0, 100).map((r, idx) => (
                         <TableRow key={r.id}>
-                          <TableCell className="text-center font-medium">{idx + 1}</TableCell>
-                          <TableCell className="max-w-[200px] truncate" title={r.students?.name ?? 'Unknown'}>
-                            {r.students?.name ?? 'Unknown'}
+                          <TableCell className="text-center font-medium">
+                            {idx + 1}
                           </TableCell>
-                          <TableCell>{r.students?.matric_no ?? '-'}</TableCell>
-                          <TableCell>{r.students?.gender ?? '-'}</TableCell>
+                          <TableCell
+                            className="max-w-[200px] truncate"
+                            title={r.students?.name ?? "Unknown"}
+                          >
+                            {r.students?.name ?? "Unknown"}
+                          </TableCell>
+                          <TableCell>{r.students?.matric_no ?? "-"}</TableCell>
+                          <TableCell>{r.students?.gender ?? "-"}</TableCell>
                           <TableCell>
                             <Badge variant="outline">
-                              {r.courses?.code || '-'}
+                              {r.courses?.code || "-"}
                             </Badge>
                           </TableCell>
                           <TableCell>{r.date}</TableCell>
                           <TableCell>
-                            <span className={`text-xs px-2 py-0.5 rounded-full font-medium capitalize ${statusStyles[r.status] || 'bg-muted'}`}>
+                            <span
+                              className={`text-xs px-2 py-0.5 rounded-full font-medium capitalize ${statusStyles[r.status] || "bg-muted"}`}
+                            >
                               {r.status}
                             </span>
                           </TableCell>
@@ -1980,15 +2749,24 @@ const DeptAdminDashboard = () => {
           </Card>
         )}
 
-        {activeTab === 'logins' && (
+        {activeTab === "logins" && (
           <Card>
             <CardHeader>
               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                 <CardTitle className="text-lg flex items-center gap-2">
                   <ShieldCheck className="w-5 h-5" /> Student Login Audit Log
                 </CardTitle>
-                <Button size="sm" variant="outline" onClick={fetchLoginEvents} disabled={loginEventsLoading}>
-                  {loginEventsLoading ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <RefreshCw className="w-4 h-4 mr-1" />}
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={fetchLoginEvents}
+                  disabled={loginEventsLoading}
+                >
+                  {loginEventsLoading ? (
+                    <Loader2 className="w-4 h-4 mr-1 animate-spin" />
+                  ) : (
+                    <RefreshCw className="w-4 h-4 mr-1" />
+                  )}
                   Refresh
                 </Button>
               </div>
@@ -1998,18 +2776,23 @@ const DeptAdminDashboard = () => {
                   <Input
                     placeholder="Search by matric no or name..."
                     value={loginEventSearch}
-                    onChange={e => setLoginEventSearch(e.target.value)}
+                    onChange={(e) => setLoginEventSearch(e.target.value)}
                     className="pl-8"
                   />
                 </div>
-                <Select value={loginEventFilter} onValueChange={(v: any) => setLoginEventFilter(v)}>
+                <Select
+                  value={loginEventFilter}
+                  onValueChange={(v: any) => setLoginEventFilter(v)}
+                >
                   <SelectTrigger className="w-full sm:w-[200px]">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">All events</SelectItem>
                     <SelectItem value="success">Successful logins</SelectItem>
-                    <SelectItem value="blocked_already_used">Blocked (already used)</SelectItem>
+                    <SelectItem value="blocked_already_used">
+                      Blocked (already used)
+                    </SelectItem>
                     <SelectItem value="reset">Admin resets</SelectItem>
                   </SelectContent>
                 </Select>
@@ -2031,45 +2814,65 @@ const DeptAdminDashboard = () => {
                   <TableBody>
                     {(() => {
                       const q = loginEventSearch.trim().toLowerCase();
-                      const rows = loginEvents.filter(ev => {
-                        if (loginEventFilter !== 'all' && ev.event !== loginEventFilter) return false;
+                      const rows = loginEvents.filter((ev) => {
+                        if (
+                          loginEventFilter !== "all" &&
+                          ev.event !== loginEventFilter
+                        )
+                          return false;
                         if (!q) return true;
-                        const stu = students.find(s => s.id === ev.student_id);
+                        const stu = students.find(
+                          (s) => s.id === ev.student_id,
+                        );
                         return (
-                          (ev.matric_no?.toLowerCase().includes(q)) ||
-                          (stu?.name?.toLowerCase().includes(q))
+                          ev.matric_no?.toLowerCase().includes(q) ||
+                          stu?.name?.toLowerCase().includes(q)
                         );
                       });
                       if (rows.length === 0) {
                         return (
                           <TableRow>
-                            <TableCell colSpan={6} className="text-center text-muted-foreground py-8">
-                              {loginEventsLoading ? 'Loading...' : 'No login events yet.'}
+                            <TableCell
+                              colSpan={6}
+                              className="text-center text-muted-foreground py-8"
+                            >
+                              {loginEventsLoading
+                                ? "Loading..."
+                                : "No login events yet."}
                             </TableCell>
                           </TableRow>
                         );
                       }
                       const styles: Record<string, string> = {
-                        success: 'bg-green-100 text-green-700',
-                        blocked_already_used: 'bg-red-100 text-red-700',
-                        reset: 'bg-amber-100 text-amber-700',
+                        success: "bg-green-100 text-green-700",
+                        blocked_already_used: "bg-red-100 text-red-700",
+                        reset: "bg-amber-100 text-amber-700",
                       };
                       const labels: Record<string, string> = {
-                        success: 'Signed in',
-                        blocked_already_used: 'Blocked',
-                        reset: 'Admin reset',
+                        success: "Signed in",
+                        blocked_already_used: "Blocked",
+                        reset: "Admin reset",
                       };
                       return rows.map((ev, idx) => {
-                        const stu = students.find(s => s.id === ev.student_id);
+                        const stu = students.find(
+                          (s) => s.id === ev.student_id,
+                        );
                         return (
                           <TableRow key={ev.id}>
-                            <TableCell className="text-center font-medium">{idx + 1}</TableCell>
-                            <TableCell className="max-w-[200px] truncate" title={stu?.name ?? '—'}>
-                              {stu?.name ?? '—'}
+                            <TableCell className="text-center font-medium">
+                              {idx + 1}
                             </TableCell>
-                            <TableCell>{ev.matric_no ?? '—'}</TableCell>
+                            <TableCell
+                              className="max-w-[200px] truncate"
+                              title={stu?.name ?? "—"}
+                            >
+                              {stu?.name ?? "—"}
+                            </TableCell>
+                            <TableCell>{ev.matric_no ?? "—"}</TableCell>
                             <TableCell>
-                              <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${styles[ev.event] || 'bg-muted'}`}>
+                              <span
+                                className={`text-xs px-2 py-0.5 rounded-full font-medium ${styles[ev.event] || "bg-muted"}`}
+                              >
                                 {labels[ev.event] || ev.event}
                               </span>
                             </TableCell>
@@ -2077,9 +2880,10 @@ const DeptAdminDashboard = () => {
                               {new Date(ev.created_at).toLocaleString()}
                             </TableCell>
                             <TableCell className="text-xs text-muted-foreground">
-                              {ev.event === 'blocked_already_used' && ev.detail?.first_login_at
+                              {ev.event === "blocked_already_used" &&
+                              ev.detail?.first_login_at
                                 ? `First login: ${new Date(ev.detail.first_login_at).toLocaleString()}`
-                                : '—'}
+                                : "—"}
                             </TableCell>
                           </TableRow>
                         );

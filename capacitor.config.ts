@@ -5,7 +5,7 @@ const config: CapacitorConfig = {
   appName: 'attendance',
   webDir: 'dist',
   server: {
-    url: 'https://smart-attendance-hub-ten.vercel.app/',
+    url: 'https://smart-attendance-hub-auo.vercel.app/',
     cleartext: true,
   },
 };

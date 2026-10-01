@@ -24,7 +24,7 @@
 
         </activity>
 
-        <provider
+         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.fileprovider"
             android:exported="false"
@@ -35,7 +35,9 @@
         </provider>
     </application>
 
-    <!-- Permissions -->
-
+    <!-- Native Hardware Location Permission Enforcements -->
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-feature android:name="android.hardware.location.gps" android:required="true" />
 </manifest>
