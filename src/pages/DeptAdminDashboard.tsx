@@ -81,7 +81,7 @@ const DeptAdminDashboard = () => {
   const [loginEventsLoading, setLoginEventsLoading] = useState(false);
   const [loginEventFilter, setLoginEventFilter] = useState<'all' | 'success' | 'blocked_already_used' | 'reset'>('all');
   const [loginEventSearch, setLoginEventSearch] = useState('');
-  const [historySource, setHistorySource] = useState<'local' | 'sheet'>('sheet');
+  const [historySource, setHistorySource] = useState<'local' | 'sheet'>('local');
   const [sheetHistory, setSheetHistory] = useState<AttendanceRecord[]>([]);
   const [sheetHistoryLoading, setSheetHistoryLoading] = useState(false);
   const [sheetUrl, setSheetUrl] = useState<string | null>(null);
@@ -172,6 +172,32 @@ const DeptAdminDashboard = () => {
       fetchAttendanceGrid();
     }
   }, [selectedCourse, dateColumns]);
+
+  // Live updates: refresh grid + history when attendance changes in this department (e.g. QR scans).
+  const liveRefreshRef = useRef<() => void>(() => {});
+  liveRefreshRef.current = () => {
+    if (selectedCourse) fetchAttendanceGrid();
+    fetchHistory();
+  };
+  useEffect(() => {
+    if (!profile?.department_id) return;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const channel = supabase
+      .channel(`attendance-live-${profile.department_id}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'attendance', filter: `department_id=eq.${profile.department_id}` },
+        () => {
+          if (timer) clearTimeout(timer);
+          timer = setTimeout(() => liveRefreshRef.current(), 600);
+        }
+      )
+      .subscribe();
+    return () => {
+      if (timer) clearTimeout(timer);
+      supabase.removeChannel(channel);
+    };
+  }, [profile?.department_id]);
 
   const initializeDashboard = async () => {
     try {
@@ -1465,6 +1491,19 @@ const DeptAdminDashboard = () => {
                     <p className="text-sm">Rotating code: <span className="font-mono font-bold tracking-widest">{rotatingCode}</span></p>
                   )}
                   <p className="text-2xl font-mono font-bold">{expired ? 'EXPIRED' : `${mm}:${ss}`}</p>
+                  {(() => {
+                    const signed = history.filter(r => r.course_id === qrSession.course_id && r.date === qrSession.date && r.status === 'present');
+                    return (
+                      <div className="text-sm">
+                        <p className="font-semibold">{signed.length} student{signed.length === 1 ? '' : 's'} signed in</p>
+                        {signed.length > 0 && (
+                          <p className="text-xs text-muted-foreground max-h-20 overflow-y-auto">
+                            {signed.map(r => r.students?.name ?? 'Unknown').join(', ')}
+                          </p>
+                        )}
+                      </div>
+                    );
+                  })()}
                   <p className="text-xs text-muted-foreground break-all">{scanUrl}</p>
 
                   <div className="flex flex-wrap gap-2 justify-center">
@@ -1817,8 +1856,8 @@ const DeptAdminDashboard = () => {
                   <CardTitle className="text-lg">Attendance History</CardTitle>
                   <p className="text-xs text-muted-foreground mt-1">
                     {historySource === 'sheet'
-                      ? <>Source: <span className="font-medium">Google Sheet</span>{sheetUrl && <> · <a href={sheetUrl} target="_blank" rel="noreferrer" className="underline">Open sheet</a></>}</>
-                      : <>Source: <span className="font-medium">Local database</span></>}
+                      ? <>Source: <span className="font-medium">Google Sheet archive</span>{sheetUrl && <> · <a href={sheetUrl} target="_blank" rel="noreferrer" className="underline">Open sheet</a></>}</>
+                      : <>Source: <span className="font-medium">Recent (live)</span> · updates automatically</>}
                   </p>
                 </div>
                 <div className="flex flex-wrap gap-2 items-center">
@@ -1827,8 +1866,8 @@ const DeptAdminDashboard = () => {
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="sheet">Google Sheet</SelectItem>
-                      <SelectItem value="local">Local database</SelectItem>
+                      <SelectItem value="local">Recent (live)</SelectItem>
+                      <SelectItem value="sheet">Archive (Google Sheet)</SelectItem>
                     </SelectContent>
                   </Select>
                   {historySource === 'sheet' && (
