@@ -69,6 +69,46 @@ export async function compareFaces(enrolled: string, selfie: string): Promise<Fa
   }
 }
 
+export interface FaceQualityResult { ok: boolean; acceptable: boolean; issues: string[]; error?: string; status?: number }
+
+// Checks an enrollment photo: exactly one clear, well-lit, unobstructed, real face.
+export async function checkFaceQuality(image: string): Promise<FaceQualityResult> {
+  const key = Deno.env.get('LOVABLE_API_KEY');
+  if (!key) return { ok: false, acceptable: false, issues: [], error: 'LOVABLE_API_KEY not configured' };
+  const prompt =
+    'You check reference photos for a face-recognition attendance system. Judge this photo. It is acceptable ONLY if: ' +
+    'exactly one human face is visible; the face is centered and fills a good part of the frame; lighting is good (not too dark, not washed out, no harsh shadow over the face); ' +
+    'the photo is sharp (not blurry); both eyes are visible (no sunglasses, mask, hand or hair covering the face); the person faces the camera; ' +
+    'and it is a live photo, not a picture of a screen or printed photo. ' +
+    'Reply ONLY with compact JSON: {"acceptable": true|false, "issues": ["short plain-English tip for each problem"]}.';
+  const resp = await fetch(GATEWAY, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}`, 'Lovable-API-Key': key },
+    body: JSON.stringify({
+      model: MODEL,
+      messages: [{ role: 'user', content: [
+        { type: 'text', text: prompt },
+        { type: 'image_url', image_url: { url: asDataUrl(image) } },
+      ] }],
+    }),
+  });
+  if (!resp.ok) {
+    if (resp.status === 429) return { ok: false, acceptable: false, issues: [], status: 429, error: 'Photo check busy. Try again shortly.' };
+    if (resp.status === 402) return { ok: false, acceptable: false, issues: [], status: 402, error: 'AI credits exhausted. Ask an admin to top up.' };
+    return { ok: false, acceptable: false, issues: [], status: 500, error: 'Photo check failed. Try again.' };
+  }
+  const data = await resp.json().catch(() => ({}));
+  const raw: string = data?.choices?.[0]?.message?.content ?? '';
+  const m = raw.match(/\{[\s\S]*\}/);
+  try {
+    const parsed = JSON.parse(m?.[0] ?? '');
+    const issues = Array.isArray(parsed.issues) ? parsed.issues.map(String).slice(0, 4) : [];
+    return { ok: true, acceptable: Boolean(parsed.acceptable), issues };
+  } catch {
+    return { ok: false, acceptable: false, issues: [], status: 500, error: 'Photo check unreadable. Try again.' };
+  }
+}
+
 export async function fetchEnrolledFace(admin: any, faceUrl: string): Promise<string | null> {
   // faceUrl is a storage path inside the private `faces` bucket.
   const { data, error } = await admin.storage.from('faces').download(faceUrl);

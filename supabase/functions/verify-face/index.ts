@@ -2,7 +2,7 @@
 //   action: 'enroll'  -> stores the selfie in the private `faces` bucket, stamps students.face_enrolled_at
 //   action: 'verify'  -> compares a live selfie against the enrolled photo (debug / self-test)
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.4';
-import { compareFaces, fetchEnrolledFace } from '../_shared/face.ts';
+import { compareFaces, fetchEnrolledFace, checkFaceQuality } from '../_shared/face.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -51,6 +51,12 @@ Deno.serve(async (req) => {
     if (action === 'enroll') {
       const { bytes, contentType } = decodeDataUrl(image);
       if (bytes.length > 4_000_000) return json({ error: 'Photo too large. Try again.' }, 413);
+      const q = await checkFaceQuality(image);
+      if (!q.ok) return json({ error: q.error }, q.status ?? 500);
+      if (!q.acceptable) {
+        const tips = q.issues.length ? q.issues.join(' ') : 'Make sure your face is clear, centered and well lit.';
+        return json({ error: `Photo not clear enough: ${tips}`, issues: q.issues, quality_rejected: true }, 422);
+      }
       const path = `${user.id}/face.jpg`;
       const { error: upErr } = await admin.storage.from('faces').upload(path, bytes, { contentType, upsert: true });
       if (upErr) throw upErr;
