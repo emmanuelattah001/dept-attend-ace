@@ -132,7 +132,8 @@ Deno.serve(async (req) => {
       if (!match.same_person) return await fail('face_mismatch', 'Face did not match your enrolled photo.', 403);
       score += Math.round((W.face * Math.min(100, match.confidence)) / 100);
     } else {
-      proofs.face = { required: false, note: 'not_enrolled' };
+      proofs.face = { required: true, enrolled: false };
+      return await fail('face_not_enrolled', 'You must enroll your face on your dashboard before you can scan for attendance.', 403);
     }
 
     // ---- Proof 4: Device ----
