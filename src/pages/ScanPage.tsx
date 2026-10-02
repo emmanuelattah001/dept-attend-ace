@@ -48,11 +48,12 @@ const ScanPage = () => {
     }
   }, [user, loading, navigate, params]);
 
-  // Does this student have a face enrolled? (drives whether we capture a selfie)
+  // Face enrollment is mandatory before scanning.
+  const [faceChecked, setFaceChecked] = useState(false);
   useEffect(() => {
     if (!user) return;
     supabase.from('students').select('face_url').eq('auth_user_id', user.id).maybeSingle()
-      .then(({ data }) => setNeedsFace(Boolean((data as any)?.face_url)));
+      .then(({ data }) => { setNeedsFace(Boolean((data as any)?.face_url)); setFaceChecked(true); });
   }, [user]);
 
   const stopSelfieCamera = () => {
@@ -182,9 +183,9 @@ const ScanPage = () => {
   // Auto-submit if token in URL
   useEffect(() => {
     const tok = params.get('token');
-    if (user && tok && !submittedRef.current) submitToken(tok, params.get('c') ?? undefined);
+    if (user && faceChecked && needsFace && tok && !submittedRef.current) submitToken(tok, params.get('c') ?? undefined);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user, params, needsFace]);
+  }, [user, params, needsFace, faceChecked]);
 
   const startCamera = async () => {
     setResult(null);
@@ -215,7 +216,29 @@ const ScanPage = () => {
     stopSelfieCamera();
   }, []);
 
-  if (loading) return null;
+  if (loading || (user && !faceChecked)) return null;
+
+  if (user && !needsFace) {
+    return (
+      <div className="min-h-screen bg-background p-4">
+        <div className="max-w-md mx-auto space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-lg flex items-center gap-2">
+                <ScanFace className="w-5 h-5 text-primary" /> Face enrollment required
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <p className="text-sm text-muted-foreground">
+                You need to save your face on your dashboard before you can scan the QR code to mark attendance.
+              </p>
+              <Button className="w-full" onClick={() => navigate('/')}>Go to dashboard to enroll</Button>
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+    );
+  }
 
   const proofs = result?.proofs ?? {};
 
