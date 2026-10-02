@@ -14,6 +14,7 @@ export const FaceEnrollment = ({ enrolledAt, onEnrolled }: Props) => {
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [preview, setPreview] = useState<string | null>(null);
+  const [issues, setIssues] = useState<string[]>([]);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
 
@@ -58,10 +59,19 @@ export const FaceEnrollment = ({ enrolledAt, onEnrolled }: Props) => {
   const save = async () => {
     if (!preview) return;
     setBusy(true);
+    setIssues([]);
     try {
-      const { data, error } = await supabase.functions.invoke('verify-face', {
+      let { data, error } = await supabase.functions.invoke('verify-face', {
         body: { action: 'enroll', image: preview },
       });
+      if (error && !data) {
+        try { data = await (error as any)?.context?.json?.(); } catch { /* ignore */ }
+      }
+      if ((data as any)?.quality_rejected) {
+        setIssues((data as any)?.issues?.length ? (data as any).issues : ['Make sure your face is clear, centered and well lit.']);
+        toast.error('Photo not clear enough — please retake');
+        return;
+      }
       const err = (data as any)?.error || error?.message;
       if (err) throw new Error(err);
       toast.success('Face enrolled');
@@ -91,10 +101,20 @@ export const FaceEnrollment = ({ enrolledAt, onEnrolled }: Props) => {
 
         {open && (
           <div className="space-y-3">
+            {!preview && (
+              <p className="text-xs text-muted-foreground">Face the camera in good light, remove sunglasses or masks, and keep your whole face in view.</p>
+            )}
             {preview ? (
               <img src={preview} alt="Captured selfie preview" className="w-40 h-40 rounded-lg object-cover border" />
             ) : (
               <video ref={videoRef} playsInline muted className="w-40 h-40 rounded-lg object-cover border bg-muted" />
+            )}
+            {busy && <p className="text-xs text-muted-foreground">Checking photo quality...</p>}
+            {issues.length > 0 && (
+              <div className="rounded-md bg-destructive/10 text-destructive p-3 text-xs space-y-1">
+                <p className="font-semibold">Please retake your photo:</p>
+                <ul className="list-disc pl-4">{issues.map((i, k) => <li key={k}>{i}</li>)}</ul>
+              </div>
             )}
             <div className="flex flex-wrap gap-2">
               {!preview ? (
