@@ -1,6 +1,11 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { Html5Qrcode } from "html5-qrcode";
+import {
+  FaceDetector,
+  FilesetResolver,
+  type Detection,
+} from "@mediapipe/tasks-vision";
 import { Geolocation } from "@capacitor/geolocation";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
@@ -18,9 +23,19 @@ import {
   AlertCircle,
   ShieldCheck,
   ScanLine,
+  UserRoundCheck,
+  CircleAlert,
 } from "lucide-react";
 
 const DEVICE_KEY = "attendance_device_id";
+
+const FACE_WASM_URL =
+  "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision/wasm";
+
+const FACE_MODEL_URL =
+  "https://storage.googleapis.com/mediapipe-models/face_detector/blaze_face_short_range/float16/1/blaze_face_short_range.tflite";
+
+const REQUIRED_STABLE_FRAMES = 8;
 
 function getDeviceId(): string {
   let id = localStorage.getItem(DEVICE_KEY);
@@ -39,6 +54,18 @@ type LocationData = {
   accuracy: number;
 };
 
+type FaceStatus =
+  | "loading"
+  | "searching"
+  | "detected"
+  | "move-closer"
+  | "move-away"
+  | "center"
+  | "hold"
+  | "capturing"
+  | "captured"
+  | "error";
+
 export default function ScanPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -47,6 +74,16 @@ export default function ScanPage() {
 
   const scannerRef = useRef<Html5Qrcode | null>(null);
   const submittedRef = useRef(false);
+
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+
+  const selfieStreamRef = useRef<MediaStream | null>(null);
+  const faceDetectorRef = useRef<FaceDetector | null>(null);
+
+  const animationFrameRef = useRef<number | null>(null);
+  const stableFramesRef = useRef(0);
+  const autoCaptureRef = useRef(false);
 
   const [deviceId] = useState<string>(() => getDeviceId());
 
@@ -61,14 +98,16 @@ export default function ScanPage() {
 
   const [cameraActive, setCameraActive] = useState(false);
 
-  const videoRef = useRef<HTMLVideoElement | null>(null);
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const [faceStatus, setFaceStatus] = useState<FaceStatus>("searching");
+  const [faceMessage, setFaceMessage] = useState("Looking for your face...");
+
+  const [stableProgress, setStableProgress] = useState(0);
 
   const [location, setLocation] = useState<LocationData | null>(null);
 
   /*
    * --------------------------------------------------------------------------
-   * Authentication / Face Enrollment Check
+   * Authentication / Face Enrollment
    * --------------------------------------------------------------------------
    */
 
@@ -122,7 +161,7 @@ export default function ScanPage() {
       }
     };
 
-    checkFaceEnrollment();
+    void checkFaceEnrollment();
 
     return () => {
       mounted = false;
@@ -131,18 +170,71 @@ export default function ScanPage() {
 
   /*
    * --------------------------------------------------------------------------
+   * Face Detector
+   * --------------------------------------------------------------------------
+   */
+
+  const initializeFaceDetector = async () => {
+    if (faceDetectorRef.current) {
+      return faceDetectorRef.current;
+    }
+
+    const vision = await FilesetResolver.forVisionTasks(FACE_WASM_URL);
+
+    const detector = await FaceDetector.createFromOptions(vision, {
+      baseOptions: {
+        modelAssetPath: FACE_MODEL_URL,
+        delegate: "GPU",
+      },
+      runningMode: "VIDEO",
+      minDetectionConfidence: 0.65,
+    });
+
+    faceDetectorRef.current = detector;
+
+    return detector;
+  };
+
+  /*
+   * --------------------------------------------------------------------------
+   * Stop Face Detection Loop
+   * --------------------------------------------------------------------------
+   */
+
+  const stopFaceDetection = () => {
+    if (animationFrameRef.current !== null) {
+      cancelAnimationFrame(animationFrameRef.current);
+      animationFrameRef.current = null;
+    }
+
+    stableFramesRef.current = 0;
+    setStableProgress(0);
+  };
+
+  /*
+   * --------------------------------------------------------------------------
    * Stop Selfie Camera
    * --------------------------------------------------------------------------
    */
 
-  const stopSelfieCamera = () => {
-    if (selfieStream) {
-      selfieStream.getTracks().forEach((track) => track.stop());
+  const stopSelfieCamera = useCallback(() => {
+    stopFaceDetection();
+
+    const stream = selfieStreamRef.current;
+
+    if (stream) {
+      stream.getTracks().forEach((track) => track.stop());
+    }
+
+    selfieStreamRef.current = null;
+
+    if (videoRef.current) {
+      videoRef.current.srcObject = null;
     }
 
     setSelfieStream(null);
     setCameraActive(false);
-  };
+  }, []);
 
   /*
    * --------------------------------------------------------------------------
@@ -203,64 +295,16 @@ export default function ScanPage() {
 
   /*
    * --------------------------------------------------------------------------
-   * Selfie Camera
+   * Capture Current Video Frame
    * --------------------------------------------------------------------------
    */
 
-  const startSelfieCamera = async () => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: {
-          facingMode: "user",
-          width: {
-            ideal: 1280,
-          },
-          height: {
-            ideal: 720,
-          },
-        },
-        audio: false,
-      });
-
-      setSelfieStream(stream);
-      setCameraActive(true);
-
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        await videoRef.current.play();
-      }
-    } catch (error) {
-      console.error("Selfie camera error:", error);
-
-      toast({
-        title: "Camera unavailable",
-        description:
-          "Please allow camera access and make sure your camera is available.",
-        variant: "destructive",
-      });
-
-      setCameraActive(false);
-    }
-  };
-
-  /*
-   * --------------------------------------------------------------------------
-   * Capture Selfie
-   * --------------------------------------------------------------------------
-   */
-
-  const captureSelfie = () => {
+  const captureCurrentFrame = () => {
     const video = videoRef.current;
     const canvas = canvasRef.current;
 
     if (!video || !canvas) {
-      toast({
-        title: "Camera not ready",
-        description: "Please wait for the camera to initialize.",
-        variant: "destructive",
-      });
-
-      return;
+      throw new Error("Camera is not ready.");
     }
 
     const width = video.videoWidth || 1280;
@@ -272,34 +316,308 @@ export default function ScanPage() {
     const context = canvas.getContext("2d");
 
     if (!context) {
-      toast({
-        title: "Capture failed",
-        description: "Unable to capture the selfie.",
-        variant: "destructive",
-      });
-
-      return;
+      throw new Error("Unable to capture camera frame.");
     }
 
     context.drawImage(video, 0, 0, width, height);
 
-    const image = canvas.toDataURL("image/jpeg", 0.85);
-
-    setSelfie(image);
-    stopSelfieCamera();
+    return canvas.toDataURL("image/jpeg", 0.88);
   };
 
   /*
    * --------------------------------------------------------------------------
-   * Cancel Selfie
+   * Automatic Face Capture
+   * --------------------------------------------------------------------------
+   */
+
+  const autoCaptureFace = async () => {
+    if (autoCaptureRef.current || selfie || !cameraActive) {
+      return;
+    }
+
+    autoCaptureRef.current = true;
+
+    stopFaceDetection();
+
+    setFaceStatus("capturing");
+    setFaceMessage("Face looks good — capturing...");
+    setStableProgress(REQUIRED_STABLE_FRAMES);
+
+    try {
+      const image = captureCurrentFrame();
+
+      setSelfie(image);
+
+      setFaceStatus("captured");
+      setFaceMessage("Face captured. Verifying attendance...");
+
+      stopSelfieCamera();
+
+      /*
+       * Automatically continue into attendance verification.
+       */
+      submittedRef.current = false;
+
+      await submitToken(token);
+    } catch (error) {
+      console.error("Automatic face capture failed:", error);
+
+      autoCaptureRef.current = false;
+      setFaceStatus("error");
+      setFaceMessage("Capture failed. Please try again.");
+
+      toast({
+        title: "Face capture failed",
+        description:
+          "We could not capture a clear image. Please position your face and try again.",
+        variant: "destructive",
+      });
+    }
+  };
+
+  /*
+   * --------------------------------------------------------------------------
+   * Face Quality Evaluation
+   * --------------------------------------------------------------------------
+   */
+
+  const evaluateFace = (
+    detection: Detection,
+    width: number,
+    height: number,
+  ) => {
+    const box = detection.boundingBox;
+
+    if (!box) {
+      return {
+        valid: false,
+        status: "searching" as FaceStatus,
+        message: "Looking for your face...",
+      };
+    }
+
+    const faceWidth = box.width;
+    const faceHeight = box.height;
+
+    const centerX = box.originX + faceWidth / 2;
+    const centerY = box.originY + faceHeight / 2;
+
+    const normalizedCenterX = centerX / width;
+    const normalizedCenterY = centerY / height;
+
+    const faceArea = (faceWidth * faceHeight) / (width * height);
+
+    /*
+     * Face should occupy approximately 12% - 65% of the frame.
+     */
+    if (faceArea < 0.12) {
+      return {
+        valid: false,
+        status: "move-closer" as FaceStatus,
+        message: "Move a little closer",
+      };
+    }
+
+    if (faceArea > 0.65) {
+      return {
+        valid: false,
+        status: "move-away" as FaceStatus,
+        message: "Move a little farther away",
+      };
+    }
+
+    /*
+     * Keep face reasonably centered.
+     */
+    if (
+      normalizedCenterX < 0.32 ||
+      normalizedCenterX > 0.68 ||
+      normalizedCenterY < 0.28 ||
+      normalizedCenterY > 0.72
+    ) {
+      return {
+        valid: false,
+        status: "center" as FaceStatus,
+        message: "Center your face inside the frame",
+      };
+    }
+
+    return {
+      valid: true,
+      status: "hold" as FaceStatus,
+      message: "Hold still...",
+    };
+  };
+
+  /*
+   * --------------------------------------------------------------------------
+   * Live Face Detection Loop
+   * --------------------------------------------------------------------------
+   */
+
+  const runFaceDetection = () => {
+    const video = videoRef.current;
+    const detector = faceDetectorRef.current;
+
+    if (!video || !detector || !cameraActive || selfie) {
+      return;
+    }
+
+    if (video.readyState < 2) {
+      animationFrameRef.current = requestAnimationFrame(runFaceDetection);
+      return;
+    }
+
+    try {
+      const result = detector.detectForVideo(video, performance.now());
+
+      const detections = result.detections ?? [];
+
+      /*
+       * Exactly one face is required.
+       */
+      if (detections.length === 0) {
+        stableFramesRef.current = 0;
+        setStableProgress(0);
+        setFaceStatus("searching");
+        setFaceMessage("Looking for your face...");
+      } else if (detections.length > 1) {
+        stableFramesRef.current = 0;
+        setStableProgress(0);
+        setFaceStatus("error");
+        setFaceMessage("Only one face should be visible");
+      } else {
+        const quality = evaluateFace(
+          detections[0],
+          video.videoWidth,
+          video.videoHeight,
+        );
+
+        setFaceStatus(quality.status);
+        setFaceMessage(quality.message);
+
+        if (quality.valid) {
+          stableFramesRef.current += 1;
+
+          const progress = Math.min(
+            100,
+            Math.round(
+              (stableFramesRef.current / REQUIRED_STABLE_FRAMES) * 100,
+            ),
+          );
+
+          setStableProgress(progress);
+
+          if (stableFramesRef.current >= REQUIRED_STABLE_FRAMES) {
+            void autoCaptureFace();
+            return;
+          }
+        } else {
+          stableFramesRef.current = 0;
+          setStableProgress(0);
+        }
+      }
+    } catch (error) {
+      console.error("Live face detection error:", error);
+    }
+
+    animationFrameRef.current = requestAnimationFrame(runFaceDetection);
+  };
+
+  /*
+   * --------------------------------------------------------------------------
+   * Start Selfie Camera
+   * --------------------------------------------------------------------------
+   */
+
+  const startSelfieCamera = async () => {
+    try {
+      autoCaptureRef.current = false;
+      stableFramesRef.current = 0;
+
+      setStableProgress(0);
+      setFaceStatus("loading");
+      setFaceMessage("Preparing face verification...");
+      setSelfie(null);
+
+      const detector = await initializeFaceDetector();
+
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          facingMode: "user",
+          width: {
+            ideal: 1280,
+          },
+          height: {
+            ideal: 720,
+          },
+          frameRate: {
+            ideal: 30,
+            max: 30,
+          },
+        },
+        audio: false,
+      });
+
+      selfieStreamRef.current = stream;
+
+      setSelfieStream(stream);
+      setCameraActive(true);
+
+      /*
+       * Wait for React to attach the stream to the video element.
+       */
+      requestAnimationFrame(async () => {
+        const video = videoRef.current;
+
+        if (!video) {
+          return;
+        }
+
+        video.srcObject = stream;
+
+        await video.play();
+
+        if (detector) {
+          setFaceStatus("searching");
+          setFaceMessage("Looking for your face...");
+
+          animationFrameRef.current = requestAnimationFrame(runFaceDetection);
+        }
+      });
+    } catch (error) {
+      console.error("Selfie camera error:", error);
+
+      stopSelfieCamera();
+
+      setFaceStatus("error");
+      setFaceMessage("Camera could not be started.");
+
+      toast({
+        title: "Camera unavailable",
+        description:
+          "Please allow camera access and make sure your camera is available.",
+        variant: "destructive",
+      });
+    }
+  };
+
+  /*
+   * --------------------------------------------------------------------------
+   * Cancel Face Verification
    * --------------------------------------------------------------------------
    */
 
   const cancelSelfie = () => {
     stopSelfieCamera();
+
     setSelfie(null);
+    setFaceStatus("searching");
+    setFaceMessage("Looking for your face...");
+    setStableProgress(0);
 
     submittedRef.current = false;
+    autoCaptureRef.current = false;
   };
 
   /*
@@ -325,51 +643,32 @@ export default function ScanPage() {
       return;
     }
 
+    /*
+     * Face enrollment requires a fresh live selfie.
+     */
+    if (hasFaceEnrollment && !selfie) {
+      setToken(attendanceToken);
+      setLoading(false);
+
+      await startSelfieCamera();
+
+      return;
+    }
+
     submittedRef.current = true;
     setLoading(true);
 
     try {
       /*
-       * Mandatory face enrollment flow:
-       *
-       * A student must already have a face enrolled before attendance
-       * scanning can proceed.
-       *
-       * Once enrolled, the student must provide a fresh selfie for
-       * attendance verification.
+       * Get native device location.
        */
-
-      if (hasFaceEnrollment && !selfie) {
-        setToken(attendanceToken);
-
-        setLoading(false);
-
-        await startSelfieCamera();
-
-        submittedRef.current = false;
-
-        return;
-      }
-
-      /*
-       * Get device location using Capacitor.
-       */
-
       const loc = await getLocation();
-
-      /*
-       * Location is required for this attendance verification flow.
-       */
 
       if (!loc) {
         setLoading(false);
         submittedRef.current = false;
         return;
       }
-
-      /*
-       * Prepare request for the Supabase Edge Function.
-       */
 
       const body: Record<string, unknown> = {
         token: attendanceToken,
@@ -421,6 +720,13 @@ export default function ScanPage() {
       setLocation(null);
 
       submittedRef.current = false;
+      autoCaptureRef.current = false;
+
+      /*
+       * Give the user a fresh scanner after successful attendance.
+       */
+      setFaceStatus("searching");
+      setFaceMessage("Ready for the next attendance scan.");
     } catch (error) {
       console.error("Attendance submission failed:", error);
 
@@ -435,32 +741,15 @@ export default function ScanPage() {
         variant: "destructive",
       });
 
+      /*
+       * Allow another attempt.
+       */
+      setSelfie(null);
       submittedRef.current = false;
+      autoCaptureRef.current = false;
     } finally {
       setLoading(false);
     }
-  };
-
-  /*
-   * --------------------------------------------------------------------------
-   * Confirm Selfie
-   * --------------------------------------------------------------------------
-   */
-
-  const confirmSelfieAndSubmit = async () => {
-    if (!selfie) {
-      toast({
-        title: "Selfie required",
-        description: "Please capture your selfie before continuing.",
-        variant: "destructive",
-      });
-
-      return;
-    }
-
-    submittedRef.current = false;
-
-    await submitToken(token);
   };
 
   /*
@@ -472,7 +761,7 @@ export default function ScanPage() {
   const handleScanResult = async (decodedText: string) => {
     const scannedToken = decodedText.trim();
 
-    if (!scannedToken) {
+    if (!scannedToken || submittedRef.current) {
       return;
     }
 
@@ -512,7 +801,7 @@ export default function ScanPage() {
         },
         handleScanResult,
         () => {
-          // Ignore individual QR scan failures while scanning.
+          // Ignore individual QR scan failures.
         },
       );
     } catch (error) {
@@ -557,12 +846,12 @@ export default function ScanPage() {
 
   /*
    * --------------------------------------------------------------------------
-   * Auto-submit token from URL
+   * Auto-submit Token From URL
    * --------------------------------------------------------------------------
    */
 
   useEffect(() => {
-    if (user && faceChecked && hasFaceEnrollment && !loading) {
+    if (user && faceChecked && hasFaceEnrollment && !loading && !cameraActive) {
       const urlToken = searchParams.get("token");
 
       if (urlToken) {
@@ -570,7 +859,14 @@ export default function ScanPage() {
         void submitToken(urlToken);
       }
     }
-  }, [user, faceChecked, hasFaceEnrollment, loading, searchParams, submitToken]);
+  }, [
+    user,
+    faceChecked,
+    hasFaceEnrollment,
+    loading,
+    cameraActive,
+    searchParams,
+  ]);
 
   /*
    * --------------------------------------------------------------------------
@@ -582,15 +878,26 @@ export default function ScanPage() {
     return () => {
       void stopScanner();
 
-      if (selfieStream) {
-        selfieStream.getTracks().forEach((track) => track.stop());
+      stopFaceDetection();
+
+      const stream = selfieStreamRef.current;
+
+      if (stream) {
+        stream.getTracks().forEach((track) => track.stop());
+      }
+
+      selfieStreamRef.current = null;
+
+      if (faceDetectorRef.current) {
+        faceDetectorRef.current.close();
+        faceDetectorRef.current = null;
       }
     };
-  }, [selfieStream]);
+  }, []);
 
   /*
    * --------------------------------------------------------------------------
-   * Loading State
+   * Loading
    * --------------------------------------------------------------------------
    */
 
@@ -599,6 +906,7 @@ export default function ScanPage() {
       <div className="flex min-h-[70vh] items-center justify-center">
         <div className="flex flex-col items-center gap-3">
           <RefreshCw className="h-8 w-8 animate-spin" />
+
           <p className="text-sm text-muted-foreground">
             Checking your attendance verification setup...
           </p>
@@ -609,7 +917,7 @@ export default function ScanPage() {
 
   /*
    * --------------------------------------------------------------------------
-   * Mandatory Face Enrollment
+   * Face Enrollment Required
    * --------------------------------------------------------------------------
    */
 
@@ -658,36 +966,85 @@ export default function ScanPage() {
 
   /*
    * --------------------------------------------------------------------------
-   * Selfie Verification UI
+   * Live Face Verification UI
    * --------------------------------------------------------------------------
    */
 
   if (cameraActive || selfie) {
+    const statusIsGood =
+      faceStatus === "detected" ||
+      faceStatus === "hold" ||
+      faceStatus === "captured";
+
     return (
       <div className="container mx-auto max-w-2xl px-4 py-8">
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <Camera className="h-5 w-5" />
-              Face Verification
+              Live Face Verification
             </CardTitle>
           </CardHeader>
 
           <CardContent className="space-y-5">
-            <p className="text-sm text-muted-foreground">
-              Take a clear selfie. Make sure your face is visible, centered, and
-              well lit.
-            </p>
+            <div className="text-center">
+              <p className="text-sm text-muted-foreground">
+                Position your face inside the guide. Capture happens
+                automatically.
+              </p>
+            </div>
 
             {cameraActive && (
-              <div className="overflow-hidden rounded-xl border bg-black">
+              <div className="relative overflow-hidden rounded-2xl border bg-black">
                 <video
                   ref={videoRef}
                   autoPlay
                   playsInline
                   muted
-                  className="aspect-video w-full object-cover"
+                  className="aspect-[4/3] w-full object-cover"
+                  style={{
+                    transform: "scaleX(-1)",
+                  }}
                 />
+
+                {/* Face guide */}
+                <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+                  <div
+                    className={`h-[62%] w-[52%] rounded-[45%] border-4 transition-all ${
+                      statusIsGood
+                        ? "border-emerald-400 shadow-[0_0_30px_rgba(16,185,129,0.45)]"
+                        : "border-white/70"
+                    }`}
+                  />
+                </div>
+
+                {/* Live status */}
+                <div className="absolute bottom-4 left-1/2 w-[90%] -translate-x-1/2">
+                  <div className="rounded-xl bg-black/70 p-3 text-center text-white backdrop-blur">
+                    <div className="flex items-center justify-center gap-2">
+                      {statusIsGood ? (
+                        <UserRoundCheck className="h-5 w-5 text-emerald-400" />
+                      ) : faceStatus === "error" ? (
+                        <CircleAlert className="h-5 w-5 text-red-400" />
+                      ) : (
+                        <ScanLine className="h-5 w-5 animate-pulse" />
+                      )}
+
+                      <span className="text-sm font-medium">{faceMessage}</span>
+                    </div>
+
+                    {stableProgress > 0 && stableProgress < 100 && (
+                      <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-white/20">
+                        <div
+                          className="h-full rounded-full bg-emerald-400 transition-all duration-100"
+                          style={{
+                            width: `${stableProgress}%`,
+                          }}
+                        />
+                      </div>
+                    )}
+                  </div>
+                </div>
               </div>
             )}
 
@@ -695,7 +1052,7 @@ export default function ScanPage() {
               <div className="overflow-hidden rounded-xl border">
                 <img
                   src={selfie}
-                  alt="Captured selfie"
+                  alt="Automatically captured face"
                   className="aspect-video w-full object-cover"
                 />
               </div>
@@ -703,59 +1060,48 @@ export default function ScanPage() {
 
             <canvas ref={canvasRef} className="hidden" />
 
-            {cameraActive ? (
-              <div className="flex gap-3">
-                <Button
-                  variant="outline"
-                  className="flex-1"
-                  onClick={cancelSelfie}
-                  disabled={loading}
-                >
-                  Cancel
-                </Button>
+            {cameraActive && (
+              <div className="rounded-xl border bg-muted/40 p-4">
+                <div className="grid gap-3 sm:grid-cols-3">
+                  <div className="flex items-center gap-2 text-sm">
+                    <UserRoundCheck className="h-4 w-4" />
+                    <span>One face</span>
+                  </div>
 
-                <Button
-                  className="flex-1"
-                  onClick={captureSelfie}
-                  disabled={loading}
-                >
-                  <Camera className="mr-2 h-4 w-4" />
-                  Capture Selfie
-                </Button>
-              </div>
-            ) : selfie ? (
-              <div className="space-y-3">
-                <Button
-                  className="w-full"
-                  onClick={confirmSelfieAndSubmit}
-                  disabled={loading}
-                >
-                  {loading ? (
-                    <>
-                      <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
-                      Verifying Attendance...
-                    </>
-                  ) : (
-                    <>
-                      <Check className="mr-2 h-4 w-4" />
-                      Confirm & Mark Attendance
-                    </>
-                  )}
-                </Button>
+                  <div className="flex items-center gap-2 text-sm">
+                    <ShieldCheck className="h-4 w-4" />
+                    <span>Face position</span>
+                  </div>
 
-                <Button
-                  variant="outline"
-                  className="w-full"
-                  onClick={() => {
-                    setSelfie(null);
-                    void startSelfieCamera();
-                  }}
-                  disabled={loading}
-                >
-                  Retake Selfie
-                </Button>
+                  <div className="flex items-center gap-2 text-sm">
+                    <Camera className="h-4 w-4" />
+                    <span>Live camera</span>
+                  </div>
+                </div>
               </div>
-            ) : null}
+            )}
+
+            {loading && (
+              <div className="rounded-xl border bg-muted/40 p-4 text-center">
+                <RefreshCw className="mx-auto mb-2 h-5 w-5 animate-spin" />
+
+                <p className="text-sm font-medium">Verifying attendance...</p>
+
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Checking your face, location and attendance session.
+                </p>
+              </div>
+            )}
+
+            {!loading && cameraActive && (
+              <Button
+                variant="outline"
+                className="w-full"
+                onClick={cancelSelfie}
+              >
+                Cancel Verification
+              </Button>
+            )}
           </CardContent>
         </Card>
       </div>
@@ -764,7 +1110,7 @@ export default function ScanPage() {
 
   /*
    * --------------------------------------------------------------------------
-   * Main Scanner UI
+   * Main QR Scanner
    * --------------------------------------------------------------------------
    */
 
@@ -848,11 +1194,14 @@ export default function ScanPage() {
             <div className="rounded-lg border p-3">
               <div className="flex items-center gap-2">
                 <ShieldCheck className="h-4 w-4" />
-                <span className="text-sm font-medium">Face Verification</span>
+                <span className="text-sm font-medium">
+                  Live Face Verification
+                </span>
               </div>
 
               <p className="mt-1 text-xs text-muted-foreground">
-                Your enrolled face is verified during attendance.
+                Your face is detected live and automatically captured when
+                positioned correctly.
               </p>
             </div>
 

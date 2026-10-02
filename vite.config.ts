@@ -22,8 +22,8 @@ export default defineConfig(({ mode }) => ({
         enabled: false,
       },
       workbox: {
-        navigateFallbackDenylist: [/^\/~oauth/],
-      },
+    maximumFileSizeToCacheInBytes: 5 * 1024 * 1024,
+  },
       manifest: {
         name: "Smart Attendance",
         short_name: "Attendance",

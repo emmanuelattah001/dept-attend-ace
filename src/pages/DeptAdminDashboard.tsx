@@ -133,9 +133,6 @@ const DeptAdminDashboard = () => {
     }>
   >([]);
   const [loginEventsLoading, setLoginEventsLoading] = useState(false);
-  const [loginEventFilter, setLoginEventFilter] = useState<'all' | 'success' | 'blocked_already_used' | 'reset'>('all');
-  const [loginEventSearch, setLoginEventSearch] = useState('');
-  const [historySource, setHistorySource] = useState<'local' | 'sheet'>('local');
   const [loginEventFilter, setLoginEventFilter] = useState<
     "all" | "success" | "blocked_already_used" | "reset"
   >("all");
@@ -273,12 +270,17 @@ const DeptAdminDashboard = () => {
     const channel = supabase
       .channel(`attendance-live-${profile.department_id}`)
       .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'attendance', filter: `department_id=eq.${profile.department_id}` },
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "attendance",
+          filter: `department_id=eq.${profile.department_id}`,
+        },
         () => {
           if (timer) clearTimeout(timer);
           timer = setTimeout(() => liveRefreshRef.current(), 600);
-        }
+        },
       )
       .subscribe();
     return () => {
@@ -1929,85 +1931,97 @@ const DeptAdminDashboard = () => {
                   mark attendance.
                 </p>
               </div>
-            ) : (() => {
-              const scanUrl = `${window.location.origin}/scan?token=${qrSession.token}${rotatingCode ? `&c=${rotatingCode}` : ""}`;
-              const remainingMs = new Date(qrSession.expires_at).getTime() - now;
-              const remaining = Math.max(0, Math.floor(remainingMs / 1000));
-              const mm = Math.floor(remaining / 60)
-                .toString()
-                .padStart(2, "0");
-              const ss = (remaining % 60).toString().padStart(2, "0");
-              const expired = remainingMs <= 0;
-              const signed = history.filter(
-                (r) =>
-                  r.course_id === qrSession.course_id &&
-                  r.date === qrSession.date &&
-                  r.status === "present",
-              );
+            ) : (
+              (() => {
+                const scanUrl = `${window.location.origin}/scan?token=${qrSession.token}${rotatingCode ? `&c=${rotatingCode}` : ""}`;
+                const remainingMs =
+                  new Date(qrSession.expires_at).getTime() - now;
+                const remaining = Math.max(0, Math.floor(remainingMs / 1000));
+                const mm = Math.floor(remaining / 60)
+                  .toString()
+                  .padStart(2, "0");
+                const ss = (remaining % 60).toString().padStart(2, "0");
+                const expired = remainingMs <= 0;
+                const signed = history.filter(
+                  (r) =>
+                    r.course_id === qrSession.course_id &&
+                    r.date === qrSession.date &&
+                    r.status === "present",
+                );
 
-              return (
-                <div className="space-y-3 pt-2 text-center">
-                  <div className="bg-white p-4 rounded-lg inline-block mx-auto">
-                    <QRCodeCanvas value={scanUrl} size={240} includeMargin />
-                  </div>
+                return (
+                  <div className="space-y-3 pt-2 text-center">
+                    <div className="bg-white p-4 rounded-lg inline-block mx-auto">
+                      <QRCodeCanvas value={scanUrl} size={240} includeMargin />
+                    </div>
 
-                  {rotatingCode && (
-                    <p className="text-sm">
-                      Rotating code:{" "}
-                      <span className="font-mono font-bold tracking-widest">
-                        {rotatingCode}
-                      </span>
-                    </p>
-                  )}
-
-                  <p className="text-2xl font-mono font-bold">
-                    {expired ? "EXPIRED" : `${mm}:${ss}`}
-                  </p>
-
-                  <div className="text-sm">
-                    <p className="font-semibold">
-                      {signed.length} student{signed.length === 1 ? "" : "s"} signed in
-                    </p>
-                    {signed.length > 0 && (
-                      <p className="text-xs text-muted-foreground max-h-20 overflow-y-auto">
-                        {signed.map((r) => r.students?.name ?? "Unknown").join(", ")}
+                    {rotatingCode && (
+                      <p className="text-sm">
+                        Rotating code:{" "}
+                        <span className="font-mono font-bold tracking-widest">
+                          {rotatingCode}
+                        </span>
                       </p>
                     )}
-                  </div>
 
-                  <p className="text-xs text-muted-foreground break-all">{scanUrl}</p>
+                    <p className="text-2xl font-mono font-bold">
+                      {expired ? "EXPIRED" : `${mm}:${ss}`}
+                    </p>
 
-                  <div className="flex flex-wrap gap-2 justify-center">
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => {
-                        navigator.clipboard.writeText(scanUrl);
-                        toast.success("Link copied");
-                      }}
-                    >
-                      <Copy className="w-4 h-4 mr-1" /> Copy link
-                    </Button>
-                    <Button size="sm" variant="outline" onClick={endQrSession}>
-                      End session
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="destructive"
-                      onClick={endAndMarkAbsent}
-                      disabled={qrEnding}
-                    >
-                      {qrEnding ? (
-                        <Loader2 className="w-4 h-4 mr-1 animate-spin" />
-                      ) : (
-                        <XCircle className="w-4 h-4 mr-1" />
+                    <div className="text-sm">
+                      <p className="font-semibold">
+                        {signed.length} student{signed.length === 1 ? "" : "s"}{" "}
+                        signed in
+                      </p>
+                      {signed.length > 0 && (
+                        <p className="text-xs text-muted-foreground max-h-20 overflow-y-auto">
+                          {signed
+                            .map((r) => r.students?.name ?? "Unknown")
+                            .join(", ")}
+                        </p>
                       )}
-                      End & mark absent
-                    </Button>
+                    </div>
+
+                    <p className="text-xs text-muted-foreground break-all">
+                      {scanUrl}
+                    </p>
+
+                    <div className="flex flex-wrap gap-2 justify-center">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => {
+                          navigator.clipboard.writeText(scanUrl);
+                          toast.success("Link copied");
+                        }}
+                      >
+                        <Copy className="w-4 h-4 mr-1" /> Copy link
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={endQrSession}
+                      >
+                        End session
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="destructive"
+                        onClick={endAndMarkAbsent}
+                        disabled={qrEnding}
+                      >
+                        {qrEnding ? (
+                          <Loader2 className="w-4 h-4 mr-1 animate-spin" />
+                        ) : (
+                          <XCircle className="w-4 h-4 mr-1" />
+                        )}
+                        End & mark absent
+                      </Button>
+                    </div>
                   </div>
-                </div>
-              );
-            })()}
+                );
+              })()
+            )}
           </DialogContent>
         </Dialog>
 
@@ -2552,9 +2566,34 @@ const DeptAdminDashboard = () => {
                 <div>
                   <CardTitle className="text-lg">Attendance History</CardTitle>
                   <p className="text-xs text-muted-foreground mt-1">
-                    {historySource === 'sheet'
-                      ? <>Source: <span className="font-medium">Google Sheet archive</span>{sheetUrl && <> · <a href={sheetUrl} target="_blank" rel="noreferrer" className="underline">Open sheet</a></>}</>
-                      : <>Source: <span className="font-medium">Recent (live)</span> · updates automatically</>}
+                    {historySource === "sheet" ? (
+                      <>
+                        Source:{" "}
+                        <span className="font-medium">
+                          Google Sheet archive
+                        </span>
+                        {sheetUrl && (
+                          <>
+                            {" "}
+                            ·{" "}
+                            <a
+                              href={sheetUrl}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="underline"
+                            >
+                              Open sheet
+                            </a>
+                          </>
+                        )}
+                      </>
+                    ) : (
+                      <>
+                        Source:{" "}
+                        <span className="font-medium">Recent (live)</span> ·
+                        updates automatically
+                      </>
+                    )}
                     {historySource === "sheet" ? (
                       <>
                         Source:{" "}
@@ -2592,7 +2631,9 @@ const DeptAdminDashboard = () => {
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="local">Recent (live)</SelectItem>
-                      <SelectItem value="sheet">Archive (Google Sheet)</SelectItem>
+                      <SelectItem value="sheet">
+                        Archive (Google Sheet)
+                      </SelectItem>
                     </SelectContent>
                   </Select>
                   {historySource === "sheet" && (
