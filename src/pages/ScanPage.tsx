@@ -74,6 +74,11 @@ export default function ScanPage() {
 
   const scannerRef = useRef<Html5Qrcode | null>(null);
   const submittedRef = useRef(false);
+  const tokenRef = useRef("");
+  const urlTokenHandledRef = useRef<string | null>(null);
+  const qrStartingRef = useRef(false);
+  const faceStartingRef = useRef(false);
+  const cameraRequestIdRef = useRef(0);
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -94,8 +99,6 @@ export default function ScanPage() {
   const [hasFaceEnrollment, setHasFaceEnrollment] = useState(false);
 
   const [selfie, setSelfie] = useState<string | null>(null);
-  const [selfieStream, setSelfieStream] = useState<MediaStream | null>(null);
-
   const [cameraActive, setCameraActive] = useState(false);
 
   const [faceStatus, setFaceStatus] = useState<FaceStatus>("searching");
@@ -233,6 +236,9 @@ export default function ScanPage() {
    */
 
   const stopSelfieCamera = useCallback(() => {
+    // Invalidate any pending model/camera setup before stopping the stream.
+    cameraRequestIdRef.current += 1;
+    faceStartingRef.current = false;
     stopFaceDetection();
 
     const stream = selfieStreamRef.current;
@@ -247,7 +253,6 @@ export default function ScanPage() {
       videoRef.current.srcObject = null;
     }
 
-    setSelfieStream(null);
     setCameraActive(false);
   }, []);
 
@@ -376,7 +381,7 @@ export default function ScanPage() {
       // React state updates are asynchronous. Pass the frame directly so the
       // attendance request cannot see the previous `selfie` value and reopen
       // the camera instead of submitting the captured image.
-      await submitToken(token, image);
+      await submitToken(tokenRef.current, image);
     } catch (error) {
       console.error("Automatic face capture failed:", error);
 
@@ -426,9 +431,11 @@ export default function ScanPage() {
     const faceArea = (faceWidth * faceHeight) / (width * height);
 
     /*
-     * Face should occupy approximately 12% - 65% of the frame.
+     * The detector's bounding box is smaller than the visible face guide.
+     * A 12% minimum forced users on common phone cameras to move too close,
+     * which made the preview appear to flicker between detection states.
      */
-    if (faceArea < 0.12) {
+    if (faceArea < 0.06) {
       return {
         valid: false,
         status: "move-closer" as FaceStatus,
@@ -436,7 +443,7 @@ export default function ScanPage() {
       };
     }
 
-    if (faceArea > 0.65) {
+    if (faceArea > 0.55) {
       return {
         valid: false,
         status: "move-away" as FaceStatus,
@@ -448,10 +455,10 @@ export default function ScanPage() {
      * Keep face reasonably centered.
      */
     if (
-      normalizedCenterX < 0.32 ||
-      normalizedCenterX > 0.68 ||
-      normalizedCenterY < 0.28 ||
-      normalizedCenterY > 0.72
+      normalizedCenterX < 0.28 ||
+      normalizedCenterX > 0.72 ||
+      normalizedCenterY < 0.24 ||
+      normalizedCenterY > 0.76
     ) {
       return {
         valid: false,
@@ -554,7 +561,19 @@ export default function ScanPage() {
    */
 
   const startSelfieCamera = async () => {
+    if (faceStartingRef.current || selfieStreamRef.current) {
+      return;
+    }
+
+    faceStartingRef.current = true;
+    const requestId = ++cameraRequestIdRef.current;
+
     try {
+      // A manual token can be submitted while the QR camera is still open.
+      // Release it before requesting the front camera to avoid camera-device
+      // contention, especially in Android WebViews.
+      await stopScanner();
+
       autoCaptureRef.current = false;
       stableFramesRef.current = 0;
 
@@ -582,15 +601,26 @@ export default function ScanPage() {
         audio: false,
       });
 
+      if (requestId !== cameraRequestIdRef.current) {
+        stream.getTracks().forEach((track) => track.stop());
+        return;
+      }
+
       selfieStreamRef.current = stream;
 
-      setSelfieStream(stream);
       setCameraActive(true);
 
       /*
        * Wait for React to attach the stream to the video element.
        */
       const attachCameraAndStartDetection = async () => {
+        if (
+          requestId !== cameraRequestIdRef.current ||
+          selfieStreamRef.current !== stream
+        ) {
+          return;
+        }
+
         const video = videoRef.current;
 
         if (!video) {
@@ -623,6 +653,10 @@ export default function ScanPage() {
         void attachCameraAndStartDetection();
       });
     } catch (error) {
+      if (requestId !== cameraRequestIdRef.current) {
+        return;
+      }
+
       console.error("Selfie camera error:", error);
 
       stopSelfieCamera();
@@ -636,6 +670,10 @@ export default function ScanPage() {
           "Please allow camera access and make sure your camera is available.",
         variant: "destructive",
       });
+    } finally {
+      if (requestId === cameraRequestIdRef.current) {
+        faceStartingRef.current = false;
+      }
     }
   };
 
@@ -664,7 +702,7 @@ export default function ScanPage() {
    */
 
   const submitToken = async (value?: string, capturedSelfie?: string) => {
-    const attendanceToken = (value ?? token).trim();
+    const attendanceToken = (value ?? tokenRef.current).trim();
     const selfieForSubmission = capturedSelfie ?? selfie;
 
     if (!attendanceToken) {
@@ -686,6 +724,7 @@ export default function ScanPage() {
      */
     if (hasFaceEnrollment && !selfieForSubmission) {
       setToken(attendanceToken);
+      tokenRef.current = attendanceToken;
       setLoading(false);
 
       await startSelfieCamera();
@@ -754,6 +793,7 @@ export default function ScanPage() {
       });
 
       setToken("");
+      tokenRef.current = "";
       setSelfie(null);
       setLocation(null);
 
@@ -804,6 +844,7 @@ export default function ScanPage() {
     }
 
     setToken(scannedToken);
+    tokenRef.current = scannedToken;
 
     await stopScanner();
 
@@ -817,6 +858,12 @@ export default function ScanPage() {
    */
 
   const startScanner = async () => {
+    if (qrStartingRef.current || scannerRef.current?.isScanning) {
+      return;
+    }
+
+    qrStartingRef.current = true;
+
     try {
       if (scannerRef.current) {
         await stopScanner();
@@ -845,12 +892,16 @@ export default function ScanPage() {
     } catch (error) {
       console.error("QR scanner error:", error);
 
+      await stopScanner();
+
       toast({
         title: "Scanner unavailable",
         description:
           "Unable to start the QR scanner. Check camera permissions and try again.",
         variant: "destructive",
       });
+    } finally {
+      qrStartingRef.current = false;
     }
   };
 
@@ -893,7 +944,13 @@ export default function ScanPage() {
       const urlToken = searchParams.get("token");
 
       if (urlToken) {
+        if (urlTokenHandledRef.current === urlToken) {
+          return;
+        }
+
+        urlTokenHandledRef.current = urlToken;
         setToken(urlToken);
+        tokenRef.current = urlToken;
         void submitToken(urlToken);
       }
     }
@@ -1132,13 +1189,26 @@ export default function ScanPage() {
             )}
 
             {!loading && cameraActive && (
-              <Button
-                variant="outline"
-                className="w-full"
-                onClick={cancelSelfie}
-              >
-                Cancel Verification
-              </Button>
+              <div className="grid gap-3 sm:grid-cols-2">
+                {faceStatus === "error" && (
+                  <Button
+                    className="w-full"
+                    onClick={() => {
+                      stopSelfieCamera();
+                      void startSelfieCamera();
+                    }}
+                  >
+                    <RefreshCw className="mr-2 h-4 w-4" /> Try Again
+                  </Button>
+                )}
+                <Button
+                  variant="outline"
+                  className="w-full"
+                  onClick={cancelSelfie}
+                >
+                  Cancel Verification
+                </Button>
+              </div>
             )}
           </CardContent>
         </Card>
@@ -1204,7 +1274,10 @@ export default function ScanPage() {
           <div className="space-y-3">
             <Input
               value={token}
-              onChange={(event) => setToken(event.target.value)}
+              onChange={(event) => {
+                setToken(event.target.value);
+                tokenRef.current = event.target.value;
+              }}
               placeholder="Enter attendance token"
               disabled={loading}
             />
