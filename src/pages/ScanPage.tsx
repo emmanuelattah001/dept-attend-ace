@@ -331,7 +331,7 @@ export default function ScanPage() {
    */
 
   const autoCaptureFace = async () => {
-    if (autoCaptureRef.current || selfie || !cameraActive) {
+    if (autoCaptureRef.current || !selfieStreamRef.current) {
       return;
     }
 
@@ -459,7 +459,7 @@ export default function ScanPage() {
     const video = videoRef.current;
     const detector = faceDetectorRef.current;
 
-    if (!video || !detector || !cameraActive || selfie) {
+    if (!video || !detector || !selfieStreamRef.current || autoCaptureRef.current) {
       return;
     }
 
@@ -574,9 +574,13 @@ export default function ScanPage() {
           return;
         }
 
-        video.srcObject = stream;
+        if (video.srcObject !== stream) video.srcObject = stream;
 
-        await video.play();
+        try {
+          await video.play();
+        } catch (e) {
+          if ((e as Error)?.name !== "AbortError") throw e;
+        }
 
         if (detector) {
           setFaceStatus("searching");
