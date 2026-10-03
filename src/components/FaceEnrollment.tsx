@@ -4,7 +4,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
-import { ScanFace, Camera, Check, Loader2, RefreshCw, UserRoundCheck, CircleAlert, ScanLine } from 'lucide-react';
+import { ScanFace, Camera, Check, CheckCircle2, Loader2, RefreshCw, UserRoundCheck, CircleAlert, ScanLine } from 'lucide-react';
 
 const FACE_WASM_URL = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision/wasm';
 const FACE_MODEL_URL =
@@ -166,11 +166,17 @@ export const FaceEnrollment = ({ enrolledAt, onEnrolled }: Props) => {
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-3">
-        <p className="text-sm text-muted-foreground">
-          {enrolledAt
-            ? `Enrolled on ${new Date(enrolledAt).toLocaleDateString()}. Your selfie is matched at every QR scan.`
-            : 'Enroll a clear photo of your face. It is required to verify you when scanning attendance QR codes.'}
-        </p>
+        {enrolledAt ? (
+          <div className="rounded-lg border border-success/20 bg-success/5 p-3">
+            <div className="flex items-center gap-2 text-sm font-medium text-success">
+              <CheckCircle2 className="h-4 w-4" /> Face enrolled
+            </div>
+            <p className="mt-1 text-sm text-muted-foreground">Your face is verified automatically during QR attendance.</p>
+            <p className="mt-2 text-xs text-muted-foreground">Enrolled: {new Date(enrolledAt).toLocaleDateString()}</p>
+          </div>
+        ) : (
+          <p className="text-sm text-muted-foreground">Face verification is not enrolled yet. Enroll a clear photo before scanning attendance QR codes.</p>
+        )}
 
         {open && (
           <div className="space-y-3">
@@ -238,7 +244,7 @@ export const FaceEnrollment = ({ enrolledAt, onEnrolled }: Props) => {
 
         {!open && (
           <Button size="sm" variant={enrolledAt ? 'outline' : 'default'} onClick={startCamera}>
-            <ScanFace className="w-4 h-4 mr-1" /> {enrolledAt ? 'Re-enroll face' : 'Enroll my face'}
+            <ScanFace className="w-4 h-4 mr-1" /> {enrolledAt ? 'Re-enroll Face' : 'Enroll Face'}
           </Button>
         )}
       </CardContent>

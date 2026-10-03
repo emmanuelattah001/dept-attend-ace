@@ -181,14 +181,29 @@ export default function ScanPage() {
 
     const vision = await FilesetResolver.forVisionTasks(FACE_WASM_URL);
 
-    const detector = await FaceDetector.createFromOptions(vision, {
-      baseOptions: {
-        modelAssetPath: FACE_MODEL_URL,
-        delegate: "GPU",
-      },
-      runningMode: "VIDEO",
-      minDetectionConfidence: 0.65,
-    });
+    const createDetector = (delegate: "GPU" | "CPU") =>
+      FaceDetector.createFromOptions(vision, {
+        baseOptions: {
+          modelAssetPath: FACE_MODEL_URL,
+          delegate,
+        },
+        runningMode: "VIDEO",
+        minDetectionConfidence: 0.65,
+      });
+
+    // GPU acceleration is not available in some Android WebViews. Falling back
+    // to CPU keeps detection functional instead of failing before the camera
+    // can start.
+    let detector: FaceDetector;
+    try {
+      detector = await createDetector("GPU");
+    } catch (gpuError) {
+      console.warn(
+        "GPU face detector unavailable; falling back to CPU detection.",
+        gpuError,
+      );
+      detector = await createDetector("CPU");
+    }
 
     faceDetectorRef.current = detector;
 
@@ -358,7 +373,10 @@ export default function ScanPage() {
        */
       submittedRef.current = false;
 
-      await submitToken(token);
+      // React state updates are asynchronous. Pass the frame directly so the
+      // attendance request cannot see the previous `selfie` value and reopen
+      // the camera instead of submitting the captured image.
+      await submitToken(token, image);
     } catch (error) {
       console.error("Automatic face capture failed:", error);
 
@@ -519,6 +537,11 @@ export default function ScanPage() {
       }
     } catch (error) {
       console.error("Live face detection error:", error);
+      stableFramesRef.current = 0;
+      setStableProgress(0);
+      setFaceStatus("error");
+      setFaceMessage("Face detection paused. Restart verification to try again.");
+      return;
     }
 
     animationFrameRef.current = requestAnimationFrame(runFaceDetection);
@@ -567,10 +590,16 @@ export default function ScanPage() {
       /*
        * Wait for React to attach the stream to the video element.
        */
-      requestAnimationFrame(async () => {
+      const attachCameraAndStartDetection = async () => {
         const video = videoRef.current;
 
         if (!video) {
+          // The video only mounts after `cameraActive` is rendered. Retrying
+          // avoids a timing race where the first animation frame runs before
+          // React has attached the ref, which previously left detection idle.
+          animationFrameRef.current = requestAnimationFrame(() => {
+            void attachCameraAndStartDetection();
+          });
           return;
         }
 
@@ -588,6 +617,10 @@ export default function ScanPage() {
 
           animationFrameRef.current = requestAnimationFrame(runFaceDetection);
         }
+      };
+
+      requestAnimationFrame(() => {
+        void attachCameraAndStartDetection();
       });
     } catch (error) {
       console.error("Selfie camera error:", error);
@@ -630,8 +663,9 @@ export default function ScanPage() {
    * --------------------------------------------------------------------------
    */
 
-  const submitToken = async (value?: string) => {
+  const submitToken = async (value?: string, capturedSelfie?: string) => {
     const attendanceToken = (value ?? token).trim();
+    const selfieForSubmission = capturedSelfie ?? selfie;
 
     if (!attendanceToken) {
       toast({
@@ -650,7 +684,7 @@ export default function ScanPage() {
     /*
      * Face enrollment requires a fresh live selfie.
      */
-    if (hasFaceEnrollment && !selfie) {
+    if (hasFaceEnrollment && !selfieForSubmission) {
       setToken(attendanceToken);
       setLoading(false);
 
@@ -682,8 +716,8 @@ export default function ScanPage() {
         accuracy: loc.accuracy,
       };
 
-      if (selfie) {
-        body.selfie = selfie;
+      if (selfieForSubmission) {
+        body.selfie = selfieForSubmission;
       }
 
       const {
