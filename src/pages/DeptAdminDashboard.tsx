@@ -43,7 +43,6 @@ import {
   XCircle,
   Search,
   Database,
-  BookOpen,
   AlertCircle,
   RefreshCw,
   WifiOff,
@@ -54,12 +53,14 @@ import {
   ShieldCheck,
 } from "lucide-react";
 import DashboardLayout from "@/components/DashboardLayout";
-import { SheetsActions } from "@/components/SheetsActions";
-import { SheetsSettingsDialog } from "@/components/SheetsSettingsDialog";
 import { ProgressSummary } from "@/components/ProgressSummary";
 import LoadingScreen from "@/components/LoadingScreen";
 import { QRCodeCanvas } from "qrcode.react";
 import { LocationPicker } from "@/components/LocationPicker";
+import { DashboardHeader } from "@/components/dept-admin/DashboardHeader";
+import { CourseSelector } from "@/components/dept-admin/CourseSelector";
+import { DepartmentToolbar } from "@/components/dept-admin/DepartmentToolbar";
+import type { DepartmentCourse } from "@/components/dept-admin/types";
 import * as XLSX from "xlsx";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
@@ -69,13 +70,6 @@ interface Student {
   name: string;
   gender: string | null;
   matric_no: string | null;
-  department_id: string;
-}
-
-interface Course {
-  id: string;
-  name: string;
-  code: string;
   department_id: string;
 }
 
@@ -109,7 +103,7 @@ const DeptAdminDashboard = () => {
   const { profile, user } = useAuth();
   const [students, setStudents] = useState<Student[]>([]);
   const [departmentName, setDepartmentName] = useState<string>("");
-  const [courses, setCourses] = useState<Course[]>([]);
+  const [courses, setCourses] = useState<DepartmentCourse[]>([]);
   const [selectedCourse, setSelectedCourse] = useState<string>("");
   const [dateColumns, setDateColumns] = useState<string[]>([
     new Date().toISOString().split("T")[0],
@@ -1617,200 +1611,41 @@ const DeptAdminDashboard = () => {
   return (
     <DashboardLayout>
       <div className="space-y-6">
-        <div className="flex flex-wrap justify-between items-start gap-3">
-          <div className="min-w-0">
-            <h2 className="text-xl sm:text-2xl font-bold">
-              Department Admin Dashboard
-            </h2>
-            <p className="text-muted-foreground text-sm mt-1 truncate">
-              Department:{" "}
-              <span className="font-semibold text-foreground">
-                {departmentName}
-              </span>
-            </p>
-          </div>
-          <div className="flex items-center gap-2">
-            {connectionStatus === "online" ? (
-              <Badge className="bg-green-100 text-green-800">
-                <Check className="w-3 h-3 mr-1" /> Online
-              </Badge>
-            ) : connectionStatus === "offline" ? (
-              <Badge className="bg-red-100 text-red-800">
-                <WifiOff className="w-3 h-3 mr-1" /> Offline
-              </Badge>
-            ) : (
-              <Badge variant="outline">
-                <Loader2 className="w-3 h-3 mr-1 animate-spin" /> Checking
-              </Badge>
-            )}
-          </div>
-        </div>
+        <DashboardHeader
+          departmentName={departmentName}
+          connectionStatus={connectionStatus}
+        />
 
         <ProgressSummary department={departmentName} />
 
-        <Card>
-          <CardHeader>
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-              <div>
-                <CardTitle className="text-lg flex items-center gap-2">
-                  <BookOpen className="w-5 h-5" /> Courses / Subjects
-                </CardTitle>
-                <p className="text-sm text-muted-foreground">
-                  Add courses like PHY 101, CHM 101 to mark attendance
-                  separately
-                </p>
-              </div>
-              <Dialog
-                open={showCourseDialog}
-                onOpenChange={setShowCourseDialog}
-              >
-                <DialogTrigger asChild>
-                  <Button size="sm">
-                    <Plus className="w-4 h-4 mr-1" /> Add Course
-                  </Button>
-                </DialogTrigger>
-                <DialogContent>
-                  <DialogHeader>
-                    <DialogTitle>Add New Course</DialogTitle>
-                  </DialogHeader>
-                  <div className="space-y-4 pt-2">
-                    <div>
-                      <label className="text-sm font-medium">
-                        Course Code *
-                      </label>
-                      <Input
-                        value={newCourse.code}
-                        onChange={(e) =>
-                          setNewCourse((p) => ({ ...p, code: e.target.value }))
-                        }
-                        placeholder="e.g., PHY 101, CHM 101"
-                      />
-                    </div>
-                    <div>
-                      <label className="text-sm font-medium">
-                        Course Name *
-                      </label>
-                      <Input
-                        value={newCourse.name}
-                        onChange={(e) =>
-                          setNewCourse((p) => ({ ...p, name: e.target.value }))
-                        }
-                        placeholder="e.g., General Physics, Organic Chemistry"
-                      />
-                    </div>
-                    <Button
-                      onClick={addCourse}
-                      disabled={addingCourse}
-                      className="w-full"
-                    >
-                      {addingCourse ? (
-                        <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                      ) : (
-                        <Plus className="w-4 h-4 mr-2" />
-                      )}
-                      {addingCourse ? "Adding..." : "Add Course"}
-                    </Button>
-                  </div>
-                </DialogContent>
-              </Dialog>
-            </div>
-          </CardHeader>
-          <CardContent>
-            <div className="flex flex-wrap gap-2">
-              <Button
-                variant={!selectedCourse ? "default" : "outline"}
-                size="sm"
-                onClick={() => setSelectedCourse("")}
-                className="mb-2"
-              >
-                All Courses
-              </Button>
-              {courses.map((course) => (
-                <Button
-                  key={course.id}
-                  variant={selectedCourse === course.id ? "default" : "outline"}
-                  size="sm"
-                  onClick={() => setSelectedCourse(course.id)}
-                  className="mb-2"
-                >
-                  {course.code}
-                </Button>
-              ))}
-              {courses.length === 0 && (
-                <p className="text-muted-foreground text-sm">
-                  No courses added yet. Click "Add Course" to create one.
-                </p>
-              )}
-            </div>
-          </CardContent>
-        </Card>
+        <CourseSelector
+          courses={courses}
+          selectedCourse={selectedCourse}
+          onSelectCourse={setSelectedCourse}
+          open={showCourseDialog}
+          onOpenChange={setShowCourseDialog}
+          newCourse={newCourse}
+          onNewCourseChange={setNewCourse}
+          onAddCourse={() => void addCourse()}
+          addingCourse={addingCourse}
+        />
 
-        <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3 border-b pb-2">
-          <div className="flex gap-1 overflow-x-auto -mx-1 px-1 scrollbar-thin">
-            {tabs.map((tab) => (
-              <button
-                key={tab.id}
-                onClick={() => setActiveTab(tab.id)}
-                className={`flex items-center gap-2 px-3 sm:px-4 py-2.5 text-sm font-medium border-b-2 whitespace-nowrap transition-colors ${
-                  activeTab === tab.id
-                    ? "border-primary text-primary"
-                    : "border-transparent text-muted-foreground hover:text-foreground"
-                }`}
-              >
-                <tab.icon className="w-4 h-4" /> {tab.label}
-              </button>
-            ))}
-          </div>
-          <div className="flex flex-wrap gap-2">
-            <Button
-              size="sm"
-              variant="default"
-              onClick={() => {
-                setQrCourseId(selectedCourse || "");
-                setShowQrDialog(true);
-              }}
-            >
-              <QrCode className="w-4 h-4 sm:mr-1" />{" "}
-              <span className="hidden sm:inline">Live QR Session</span>
-              <span className="sm:hidden">QR</span>
-            </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={provisionStudentLogins}
-              disabled={provisioningAuth}
-            >
-              {provisioningAuth ? (
-                <Loader2 className="w-4 h-4 sm:mr-1 animate-spin" />
-              ) : (
-                <KeyRound className="w-4 h-4 sm:mr-1" />
-              )}
-              <span className="hidden sm:inline">Create Student Logins</span>
-              <span className="sm:hidden">Create</span>
-            </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={resetStudentLogins}
-              disabled={resettingLogins}
-            >
-              {resettingLogins ? (
-                <Loader2 className="w-4 h-4 sm:mr-1 animate-spin" />
-              ) : (
-                <KeyRound className="w-4 h-4 sm:mr-1" />
-              )}
-              <span className="hidden sm:inline">Reset Login Lock</span>
-              <span className="sm:hidden">Reset</span>
-            </Button>
-            <SheetsActions
-              busy={sheetsBusy}
-              size="sm"
-              onExport={() => pushToGoogleSheets("export_all")}
-              onSync={() => pushToGoogleSheets("sync_unsynced")}
-            />
-            <SheetsSettingsDialog />
-          </div>
-        </div>
+        <DepartmentToolbar
+          tabs={tabs}
+          activeTab={activeTab}
+          onTabChange={setActiveTab}
+          onOpenQr={() => {
+            setQrCourseId(selectedCourse || "");
+            setShowQrDialog(true);
+          }}
+          onProvisionLogins={() => void provisionStudentLogins()}
+          provisioningAuth={provisioningAuth}
+          onResetLogins={() => void resetStudentLogins()}
+          resettingLogins={resettingLogins}
+          sheetsBusy={sheetsBusy}
+          onExportSheets={() => void pushToGoogleSheets("export_all")}
+          onSyncSheets={() => void pushToGoogleSheets("sync_unsynced")}
+        />
 
         <Dialog
           open={showQrDialog}
