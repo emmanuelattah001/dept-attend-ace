@@ -143,8 +143,8 @@ Deno.serve(async (req) => {
       proofs.device = { provided: true, known: Boolean(known), match: matchDevice };
       if (!known) await admin.from('students').update({ device_fingerprint: deviceId }).eq('id', student.id);
       if (matchDevice) score += W.device;
-      else if (score + 0 < PASS_THRESHOLD) {
-        return await fail('device_mismatch', 'This account is bound to a different device.', 403);
+      else {
+        return await fail('device_mismatch', 'This account is bound to a different device. Ask your admin to reset your device.', 403);
       }
     } else {
       proofs.device = { provided: false };

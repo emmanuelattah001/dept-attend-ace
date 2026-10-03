@@ -132,7 +132,7 @@ export default function ScanPage() {
         const { data, error } = await supabase
           .from("students")
           .select("face_url")
-          .eq("user_id", user.id)
+          .eq("auth_user_id", user.id)
           .maybeSingle();
 
         if (error) {

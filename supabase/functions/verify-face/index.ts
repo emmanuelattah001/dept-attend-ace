@@ -74,7 +74,8 @@ Deno.serve(async (req) => {
       if (!enrolled) return json({ error: 'Enrolled photo could not be read' }, 500);
       const result = await compareFaces(enrolled, image);
       if (!result.ok) return json({ error: result.error }, result.status ?? 500);
-      return json({ ok: true, ...result });
+      const { ok: _ok, ...rest } = result;
+      return json({ ok: true, ...rest });
     }
 
     return json({ error: 'Unknown action' }, 400);
