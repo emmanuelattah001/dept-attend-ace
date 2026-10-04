@@ -283,12 +283,9 @@ export default function ScanPage() {
       }
 
       if (permission.location !== "granted") {
-        toast({
-          title: "Location permission required",
-          description:
-            "Location permission is required to verify classroom attendance.",
-          variant: "destructive",
-        });
+        setLocationError(
+          "Location permission is required to verify classroom attendance. Please allow location access and try again.",
+        );
 
         return null;
       }
@@ -311,12 +308,9 @@ export default function ScanPage() {
     } catch (error) {
       console.error("Location reading failed:", error);
 
-      toast({
-        title: "Location unavailable",
-        description:
-          "Failed to read your device location. Ensure location is switched ON and try again.",
-        variant: "destructive",
-      });
+      setLocationError(
+        "Failed to read your device location. Ensure location is switched ON and try again.",
+      );
 
       return null;
     }
