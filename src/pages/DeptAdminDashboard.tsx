@@ -176,11 +176,16 @@ const DeptAdminDashboard = () => {
     const id = setInterval(() => setNow(Date.now()), 1000);
     let cancelled = false;
     const pull = async () => {
-      const { data } = await supabase.functions.invoke("session-token", {
+      const { data, error } = await supabase.functions.invoke("session-token", {
         body: { token: qrSession.token },
       });
-      if (!cancelled && (data as any)?.code)
-        setRotatingCode((data as any).code);
+      if (cancelled) return;
+      if (error) {
+        console.error("session-token failed", error);
+        setRotatingCode(null);
+        return;
+      }
+      if ((data as any)?.code) setRotatingCode((data as any).code);
     };
     pull();
     const poll = setInterval(pull, 10_000);
@@ -1790,14 +1795,18 @@ const DeptAdminDashboard = () => {
                       <QRCodeCanvas value={scanUrl} size={240} includeMargin />
                     </div>
 
-                    {rotatingCode && (
-                      <p className="text-sm">
-                        Rotating code:{" "}
+                    <p className="text-sm">
+                      Rotating code:{" "}
+                      {rotatingCode ? (
                         <span className="font-mono font-bold tracking-widest">
                           {rotatingCode}
                         </span>
-                      </p>
-                    )}
+                      ) : (
+                        <span className="text-muted-foreground">
+                          loading…
+                        </span>
+                      )}
+                    </p>
 
                     <p className="text-2xl font-mono font-bold">
                       {expired ? "EXPIRED" : `${mm}:${ss}`}
