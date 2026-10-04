@@ -730,7 +730,18 @@ export default function ScanPage() {
       tokenRef.current = attendanceToken;
       setLoading(false);
 
-      await startSelfieCamera();
+      try {
+        await startSelfieCamera();
+      } catch (error) {
+        console.error("Selfie camera failed to start:", error);
+        submittedRef.current = false;
+        toast({
+          title: "Camera unavailable",
+          description:
+            "Unable to start the selfie camera. Check camera permissions and try again.",
+          variant: "destructive",
+        });
+      }
 
       return;
     }
@@ -852,18 +863,36 @@ export default function ScanPage() {
    */
 
   const handleScanResult = async (decodedText: string) => {
-    const scannedToken = decodedText.trim();
+    try {
+      const scannedToken = decodedText.trim();
 
-    if (!scannedToken || submittedRef.current) {
-      return;
+      if (!scannedToken || submittedRef.current) {
+        return;
+      }
+
+      setToken(scannedToken);
+      tokenRef.current = scannedToken;
+
+      await stopScanner();
+
+      await submitToken(scannedToken);
+    } catch (error) {
+      /*
+       * This callback is invoked by the QR scanner library, so a rejection
+       * here is unhandled and crashes the page. Never let it escape.
+       */
+      console.error("QR scan handling failed:", error);
+      submittedRef.current = false;
+      setLoading(false);
+      toast({
+        title: "Scan failed",
+        description:
+          error instanceof Error
+            ? error.message
+            : "Unable to process the scanned code. Please try again.",
+        variant: "destructive",
+      });
     }
-
-    setToken(scannedToken);
-    tokenRef.current = scannedToken;
-
-    await stopScanner();
-
-    await submitToken(scannedToken);
   };
 
   /*
