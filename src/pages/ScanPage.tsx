@@ -786,7 +786,19 @@ export default function ScanPage() {
       }
 
       if (data.success === false) {
-        throw new Error(data.message || "Attendance verification failed.");
+        const failMessage = data.message || "Attendance verification failed.";
+
+        /*
+         * Location rejections get a retry prompt instead of a plain error.
+         */
+        if (/location|too far|range|distance|gps/i.test(failMessage)) {
+          setLocationError(failMessage);
+          submittedRef.current = false;
+          setLoading(false);
+          return;
+        }
+
+        throw new Error(failMessage);
       }
 
       toast({
@@ -1348,6 +1360,54 @@ export default function ScanPage() {
           </div>
         </CardContent>
       </Card>
+
+      <AlertDialog
+        open={locationError !== null}
+        onOpenChange={(open) => {
+          if (!open) {
+            setLocationError(null);
+          }
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Location problem</AlertDialogTitle>
+            <AlertDialogDescription>{locationError}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                /*
+                 * Back to scan: clear the attempt so the student can
+                 * rescan the QR code from the beginning.
+                 */
+                setLocationError(null);
+                setToken("");
+                tokenRef.current = "";
+                setSelfie(null);
+                submittedRef.current = false;
+                autoCaptureRef.current = false;
+                setFaceStatus("searching");
+                setFaceMessage("Ready for the next attendance scan.");
+              }}
+            >
+              Back to scan
+            </Button>
+            <Button
+              onClick={() => {
+                /*
+                 * Retry: re-run verification with the same scanned token.
+                 */
+                setLocationError(null);
+                void submitToken();
+              }}
+            >
+              Retry location
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
