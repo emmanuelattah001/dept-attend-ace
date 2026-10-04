@@ -8,8 +8,15 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
-const json = (body: unknown, status = 200) =>
-  new Response(JSON.stringify(body), { status, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+// Expected rejections (4xx) are returned as 200 + { success: false, message } so the
+// client shows a friendly message instead of treating them as a crash.
+const json = (body: any, status = 200) => {
+  if (status >= 400 && status < 500) {
+    body = { ...body, success: false, message: body?.message ?? body?.error, status_code: status };
+    status = 200;
+  }
+  return new Response(JSON.stringify(body), { status, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+};
 
 // Weighted confidence model (total 100)
 const W = { qr: 30, face: 30, location: 25, device: 15 };
