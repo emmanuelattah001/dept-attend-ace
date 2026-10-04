@@ -11,6 +11,14 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  AlertDialog,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
@@ -107,6 +115,7 @@ export default function ScanPage() {
   const [stableProgress, setStableProgress] = useState(0);
 
   const [location, setLocation] = useState<LocationData | null>(null);
+  const [locationError, setLocationError] = useState<string | null>(null);
 
   /*
    * --------------------------------------------------------------------------
@@ -274,12 +283,9 @@ export default function ScanPage() {
       }
 
       if (permission.location !== "granted") {
-        toast({
-          title: "Location permission required",
-          description:
-            "Location permission is required to verify classroom attendance.",
-          variant: "destructive",
-        });
+        setLocationError(
+          "Location permission is required to verify classroom attendance. Please allow location access and try again.",
+        );
 
         return null;
       }
@@ -302,12 +308,9 @@ export default function ScanPage() {
     } catch (error) {
       console.error("Location reading failed:", error);
 
-      toast({
-        title: "Location unavailable",
-        description:
-          "Failed to read your device location. Ensure location is switched ON and try again.",
-        variant: "destructive",
-      });
+      setLocationError(
+        "Failed to read your device location. Ensure location is switched ON and try again.",
+      );
 
       return null;
     }
@@ -727,7 +730,18 @@ export default function ScanPage() {
       tokenRef.current = attendanceToken;
       setLoading(false);
 
-      await startSelfieCamera();
+      try {
+        await startSelfieCamera();
+      } catch (error) {
+        console.error("Selfie camera failed to start:", error);
+        submittedRef.current = false;
+        toast({
+          title: "Camera unavailable",
+          description:
+            "Unable to start the selfie camera. Check camera permissions and try again.",
+          variant: "destructive",
+        });
+      }
 
       return;
     }
@@ -783,7 +797,19 @@ export default function ScanPage() {
       }
 
       if (data.success === false) {
-        throw new Error(data.message || "Attendance verification failed.");
+        const failMessage = data.message || "Attendance verification failed.";
+
+        /*
+         * Location rejections get a retry prompt instead of a plain error.
+         */
+        if (/location|too far|range|distance|gps/i.test(failMessage)) {
+          setLocationError(failMessage);
+          submittedRef.current = false;
+          setLoading(false);
+          return;
+        }
+
+        throw new Error(failMessage);
       }
 
       toast({
@@ -837,18 +863,36 @@ export default function ScanPage() {
    */
 
   const handleScanResult = async (decodedText: string) => {
-    const scannedToken = decodedText.trim();
+    try {
+      const scannedToken = decodedText.trim();
 
-    if (!scannedToken || submittedRef.current) {
-      return;
+      if (!scannedToken || submittedRef.current) {
+        return;
+      }
+
+      setToken(scannedToken);
+      tokenRef.current = scannedToken;
+
+      await stopScanner();
+
+      await submitToken(scannedToken);
+    } catch (error) {
+      /*
+       * This callback is invoked by the QR scanner library, so a rejection
+       * here is unhandled and crashes the page. Never let it escape.
+       */
+      console.error("QR scan handling failed:", error);
+      submittedRef.current = false;
+      setLoading(false);
+      toast({
+        title: "Scan failed",
+        description:
+          error instanceof Error
+            ? error.message
+            : "Unable to process the scanned code. Please try again.",
+        variant: "destructive",
+      });
     }
-
-    setToken(scannedToken);
-    tokenRef.current = scannedToken;
-
-    await stopScanner();
-
-    await submitToken(scannedToken);
   };
 
   /*
@@ -1345,6 +1389,54 @@ export default function ScanPage() {
           </div>
         </CardContent>
       </Card>
+
+      <AlertDialog
+        open={locationError !== null}
+        onOpenChange={(open) => {
+          if (!open) {
+            setLocationError(null);
+          }
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Location problem</AlertDialogTitle>
+            <AlertDialogDescription>{locationError}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                /*
+                 * Back to scan: clear the attempt so the student can
+                 * rescan the QR code from the beginning.
+                 */
+                setLocationError(null);
+                setToken("");
+                tokenRef.current = "";
+                setSelfie(null);
+                submittedRef.current = false;
+                autoCaptureRef.current = false;
+                setFaceStatus("searching");
+                setFaceMessage("Ready for the next attendance scan.");
+              }}
+            >
+              Back to scan
+            </Button>
+            <Button
+              onClick={() => {
+                /*
+                 * Retry: re-run verification with the same scanned token.
+                 */
+                setLocationError(null);
+                void submitToken();
+              }}
+            >
+              Retry location
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
