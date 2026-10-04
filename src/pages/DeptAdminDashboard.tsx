@@ -382,7 +382,7 @@ const DeptAdminDashboard = () => {
       if (error) throw error;
 
       if (data && data.length > 0) {
-        setCourses(data as Course[]);
+        setCourses(data as DepartmentCourse[]);
         if (!selectedCourse) {
           setSelectedCourse(data[0].id);
         }
