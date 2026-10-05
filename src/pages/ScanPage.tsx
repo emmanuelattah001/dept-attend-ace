@@ -45,6 +45,37 @@ const FACE_MODEL_URL =
 
 const REQUIRED_STABLE_FRAMES = 8;
 
+/**
+ * The lecturer QR encodes a full URL: /scan?token=...&c=ABC123.
+ * Extract the session token and the rotating 6-digit code from it,
+ * falling back to treating the text as a raw token.
+ */
+function parseScanText(text: string): { token: string; code: string } {
+  const raw = (text ?? "").trim();
+  if (!raw) return { token: "", code: "" };
+  try {
+    const url = new URL(raw);
+    const t = url.searchParams.get("token");
+    if (t) {
+      return {
+        token: t.trim(),
+        code: (url.searchParams.get("c") ?? "").trim().toUpperCase(),
+      };
+    }
+  } catch {
+    // not a URL
+  }
+  const tokenMatch = raw.match(/[?&]token=([^&\s]+)/);
+  if (tokenMatch) {
+    const codeMatch = raw.match(/[?&]c=([^&\s]+)/);
+    return {
+      token: decodeURIComponent(tokenMatch[1]),
+      code: codeMatch ? decodeURIComponent(codeMatch[1]).toUpperCase() : "",
+    };
+  }
+  return { token: raw, code: "" };
+}
+
 function getDeviceId(): string {
   let id = localStorage.getItem(DEVICE_KEY);
 
@@ -83,6 +114,7 @@ export default function ScanPage() {
   const scannerRef = useRef<Html5Qrcode | null>(null);
   const submittedRef = useRef(false);
   const tokenRef = useRef("");
+  const codeRef = useRef("");
   const urlTokenHandledRef = useRef<string | null>(null);
   const qrStartingRef = useRef(false);
   const faceStartingRef = useRef(false);
@@ -101,6 +133,7 @@ export default function ScanPage() {
   const [deviceId] = useState<string>(() => getDeviceId());
 
   const [token, setToken] = useState("");
+  const [code, setCode] = useState("");
   const [loading, setLoading] = useState(false);
 
   const [faceChecked, setFaceChecked] = useState(false);
@@ -763,6 +796,7 @@ export default function ScanPage() {
 
       const body: Record<string, unknown> = {
         token: attendanceToken,
+        code: codeRef.current.trim().toUpperCase(),
         device_id: deviceId,
         lat: loc.lat,
         lng: loc.lng,
@@ -820,6 +854,8 @@ export default function ScanPage() {
 
       setToken("");
       tokenRef.current = "";
+      setCode("");
+      codeRef.current = "";
       setSelfie(null);
       setLocation(null);
 
@@ -864,7 +900,8 @@ export default function ScanPage() {
 
   const handleScanResult = async (decodedText: string) => {
     try {
-      const scannedToken = decodedText.trim();
+      const { token: scannedToken, code: scannedCode } =
+        parseScanText(decodedText);
 
       if (!scannedToken || submittedRef.current) {
         return;
@@ -872,6 +909,8 @@ export default function ScanPage() {
 
       setToken(scannedToken);
       tokenRef.current = scannedToken;
+      setCode(scannedCode);
+      codeRef.current = scannedCode;
 
       await stopScanner();
 
@@ -986,6 +1025,7 @@ export default function ScanPage() {
   useEffect(() => {
     if (user && faceChecked && hasFaceEnrollment && !loading && !cameraActive) {
       const urlToken = searchParams.get("token");
+      const urlCode = (searchParams.get("c") ?? "").trim().toUpperCase();
 
       if (urlToken) {
         if (urlTokenHandledRef.current === urlToken) {
@@ -995,6 +1035,8 @@ export default function ScanPage() {
         urlTokenHandledRef.current = urlToken;
         setToken(urlToken);
         tokenRef.current = urlToken;
+        setCode(urlCode);
+        codeRef.current = urlCode;
         void submitToken(urlToken);
       }
     }
@@ -1319,12 +1361,40 @@ export default function ScanPage() {
             <Input
               value={token}
               onChange={(event) => {
-                setToken(event.target.value);
-                tokenRef.current = event.target.value;
+                const parsed = parseScanText(event.target.value);
+                setToken(parsed.token);
+                tokenRef.current = parsed.token;
+                if (parsed.code) {
+                  setCode(parsed.code);
+                  codeRef.current = parsed.code;
+                }
               }}
               placeholder="Enter attendance token"
               disabled={loading}
             />
+
+            <div className="space-y-1">
+              <Input
+                value={code}
+                onChange={(event) => {
+                  const next = event.target.value
+                    .toUpperCase()
+                    .replace(/[^A-Z0-9]/g, "")
+                    .slice(0, 6);
+                  setCode(next);
+                  codeRef.current = next;
+                }}
+                placeholder="6-digit code shown on screen"
+                maxLength={6}
+                inputMode="text"
+                autoCapitalize="characters"
+                className="text-center font-mono text-lg tracking-[0.4em]"
+                disabled={loading}
+              />
+              <p className="text-xs text-muted-foreground">
+                The code under the QR changes every 30 seconds — type the one showing now.
+              </p>
+            </div>
 
             <Button
               className="w-full"
@@ -1414,6 +1484,8 @@ export default function ScanPage() {
                 setLocationError(null);
                 setToken("");
                 tokenRef.current = "";
+                setCode("");
+                codeRef.current = "";
                 setSelfie(null);
                 submittedRef.current = false;
                 autoCaptureRef.current = false;
