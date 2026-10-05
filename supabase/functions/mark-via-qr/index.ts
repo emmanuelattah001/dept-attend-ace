@@ -61,10 +61,10 @@ Deno.serve(async (req) => {
 
   try {
     const authHeader = req.headers.get('Authorization') ?? '';
-    if (!authHeader) return json({ error: 'Not authenticated' }, 401);
+    if (!authHeader) return json({ success: false, message: 'Not authenticated. Please sign in again.' });
     const userClient = createClient(url, anon, { global: { headers: { Authorization: authHeader } } });
     const { data: { user }, error: userErr } = await userClient.auth.getUser();
-    if (userErr || !user) return json({ error: 'Auth invalid' }, 401);
+    if (userErr || !user) return json({ success: false, message: 'Your session has expired. Please sign in again.' });
 
     const body = await req.json().catch(() => ({}));
     const token = String(body?.token ?? '').trim();
@@ -74,7 +74,7 @@ Deno.serve(async (req) => {
     const accuracy = typeof body?.accuracy === 'number' ? body.accuracy : null;
     const selfie = typeof body?.selfie === 'string' ? body.selfie : '';
     const deviceId = String(body?.device_id ?? '').trim();
-    if (!token) return json({ error: 'Missing token' }, 400);
+    if (!token) return json({ success: false, message: 'Missing token. Rescan the live screen.' });
 
     const { data: session } = await admin
       .from('attendance_sessions')
