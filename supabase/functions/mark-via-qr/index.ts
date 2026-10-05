@@ -47,14 +47,16 @@ Deno.serve(async (req) => {
   let departmentId: string | null = null;
   let courseId: string | null = null;
 
-  const fail = async (reason: string, message: string, status: number, extra: Record<string, unknown> = {}) => {
+  // Always respond 200 with success:false so the client never sees a
+  // non-2xx (which the preview surfaces as a blank-screen runtime error).
+  const fail = async (reason: string, message: string, _status: number, extra: Record<string, unknown> = {}) => {
     try {
       await admin.from('verification_events').insert({
         session_id: sessionId, student_id: studentId, department_id: departmentId, course_id: courseId,
         outcome: 'failed', reason, confidence_score: score, proofs,
       });
     } catch (e) { console.error('verification_events insert failed', e); }
-    return json({ error: message, reason, confidence_score: score, proofs, ...extra }, status);
+    return json({ success: false, message, reason, confidence_score: score, proofs, ...extra });
   };
 
   try {
