@@ -198,6 +198,6 @@ Deno.serve(async (req) => {
     });
   } catch (e) {
     console.error('mark-via-qr error', e);
-    return json({ error: String((e as Error).message ?? e) }, 500);
+    return json({ success: false, message: String((e as Error).message ?? e) });
   }
 });
