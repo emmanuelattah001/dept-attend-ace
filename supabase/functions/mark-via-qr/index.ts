@@ -81,16 +81,16 @@ Deno.serve(async (req) => {
       .select('id, course_id, department_id, date, expires_at, created_by, latitude, longitude, radius_m, secret, rotating, rotate_seconds')
       .eq('token', token)
       .maybeSingle();
-    if (!session) return json({ error: 'Invalid QR code' }, 404);
+    if (!session) return json({ success: false, message: 'Invalid QR code. Rescan the live screen.' });
     sessionId = session.id; departmentId = session.department_id; courseId = session.course_id;
-    if (new Date(session.expires_at) < new Date()) return json({ error: 'This session has ended' }, 410);
+    if (new Date(session.expires_at) < new Date()) return json({ success: false, message: 'This session has ended. Ask for a new QR code.' });
 
     const { data: student } = await admin
       .from('students')
       .select('id, name, department_id, matric_no, face_url, device_fingerprint')
       .eq('auth_user_id', user.id)
       .maybeSingle();
-    if (!student) return json({ error: 'No student profile linked to this account' }, 403);
+    if (!student) return json({ success: false, message: 'No student profile is linked to this account.' });
     studentId = student.id;
     if (student.department_id !== session.department_id) return await fail('wrong_department', 'This session is for a different department', 403);
 
