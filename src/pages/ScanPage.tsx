@@ -45,6 +45,37 @@ const FACE_MODEL_URL =
 
 const REQUIRED_STABLE_FRAMES = 8;
 
+/**
+ * The lecturer QR encodes a full URL: /scan?token=...&c=ABC123.
+ * Extract the session token and the rotating 6-digit code from it,
+ * falling back to treating the text as a raw token.
+ */
+function parseScanText(text: string): { token: string; code: string } {
+  const raw = (text ?? "").trim();
+  if (!raw) return { token: "", code: "" };
+  try {
+    const url = new URL(raw);
+    const t = url.searchParams.get("token");
+    if (t) {
+      return {
+        token: t.trim(),
+        code: (url.searchParams.get("c") ?? "").trim().toUpperCase(),
+      };
+    }
+  } catch {
+    // not a URL
+  }
+  const tokenMatch = raw.match(/[?&]token=([^&\s]+)/);
+  if (tokenMatch) {
+    const codeMatch = raw.match(/[?&]c=([^&\s]+)/);
+    return {
+      token: decodeURIComponent(tokenMatch[1]),
+      code: codeMatch ? decodeURIComponent(codeMatch[1]).toUpperCase() : "",
+    };
+  }
+  return { token: raw, code: "" };
+}
+
 function getDeviceId(): string {
   let id = localStorage.getItem(DEVICE_KEY);
 
