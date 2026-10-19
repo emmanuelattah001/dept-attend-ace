@@ -271,18 +271,137 @@ export type Database = {
       departments: {
         Row: {
           created_at: string
+          faculty_id: string | null
           id: string
           name: string
         }
         Insert: {
           created_at?: string
+          faculty_id?: string | null
           id?: string
           name: string
         }
         Update: {
           created_at?: string
+          faculty_id?: string | null
           id?: string
           name?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "departments_faculty_id_fkey"
+            columns: ["faculty_id"]
+            isOneToOne: false
+            referencedRelation: "faculties"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      faculties: {
+        Row: {
+          created_at: string
+          id: string
+          institution_id: string
+          name: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          institution_id: string
+          name: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          institution_id?: string
+          name?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "faculties_institution_id_fkey"
+            columns: ["institution_id"]
+            isOneToOne: false
+            referencedRelation: "institutions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      hierarchy_memberships: {
+        Row: {
+          created_at: string
+          faculty_id: string | null
+          id: string
+          institution_id: string
+          role: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          faculty_id?: string | null
+          id?: string
+          institution_id: string
+          role: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          faculty_id?: string | null
+          id?: string
+          institution_id?: string
+          role?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "hierarchy_memberships_faculty_id_institution_id_fkey"
+            columns: ["faculty_id", "institution_id"]
+            isOneToOne: false
+            referencedRelation: "faculties"
+            referencedColumns: ["id", "institution_id"]
+          },
+          {
+            foreignKeyName: "hierarchy_memberships_institution_id_fkey"
+            columns: ["institution_id"]
+            isOneToOne: false
+            referencedRelation: "institutions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "hierarchy_memberships_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: true
+            referencedRelation: "profiles"
+            referencedColumns: ["user_id"]
+          },
+        ]
+      }
+      institutions: {
+        Row: {
+          created_at: string
+          id: string
+          name: string
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          name: string
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          name?: string
+          status?: string
+          updated_at?: string
         }
         Relationships: []
       }
@@ -519,6 +638,14 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      can_access_department_hierarchy: {
+        Args: { _department: string; _manage?: boolean }
+        Returns: boolean
+      }
+      can_access_hierarchy: {
+        Args: { _faculty?: string; _institution: string; _manage?: boolean }
+        Returns: boolean
+      }
       claim_student_login: { Args: never; Returns: Json }
       get_attendance_by_matric: {
         Args: { _matric_no: string }
