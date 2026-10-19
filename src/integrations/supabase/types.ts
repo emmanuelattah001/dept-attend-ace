@@ -638,14 +638,6 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-      can_access_department_hierarchy: {
-        Args: { _department: string; _manage?: boolean }
-        Returns: boolean
-      }
-      can_access_hierarchy: {
-        Args: { _faculty?: string; _institution: string; _manage?: boolean }
-        Returns: boolean
-      }
       claim_student_login: { Args: never; Returns: Json }
       get_attendance_by_matric: {
         Args: { _matric_no: string }
