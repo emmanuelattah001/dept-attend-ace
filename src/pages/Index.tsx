@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { ClipboardCheck, Download, Search, LogIn, Users, ShieldCheck, BarChart3, FileText, Smartphone, Zap } from 'lucide-react';
 import LoadingScreen from '@/components/LoadingScreen';
+import HierarchyDashboard from './HierarchyDashboard';
 
 const features = [
   {
@@ -152,13 +153,14 @@ const LandingPage = () => {
 };
 
 const Index = () => {
-  const { session, role, loading } = useAuth();
+  const { session, role, hierarchyScope, loading } = useAuth();
 
   if (loading) {
     return <LoadingScreen />;
   }
 
   if (!session) return <LandingPage />;
+  if (role !== 'super_admin' && hierarchyScope) return <HierarchyDashboard />;
 
   switch (role) {
     case 'super_admin':

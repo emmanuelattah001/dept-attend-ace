@@ -5,6 +5,8 @@ import { LogOut, ShieldCheck, Shield, UserCheck, GraduationCap, BookOpen, Users,
 
 const roleLabels: Record<string, { label: string; icon: any; color: string }> = {
   super_admin: { label: 'Super Admin', icon: Shield, color: 'bg-destructive' },
+  institution_admin: { label: 'Institution Admin', icon: Building2, color: 'bg-primary' },
+  faculty_admin: { label: 'Faculty Admin', icon: GraduationCap, color: 'bg-accent' },
   dept_admin: { label: 'Dept Admin', icon: UserCheck, color: 'bg-primary' },
   hod: { label: 'HOD', icon: Building2, color: 'bg-primary' },
   lecturer: { label: 'Lecturer', icon: BookOpen, color: 'bg-primary' },
@@ -14,8 +16,9 @@ const roleLabels: Record<string, { label: string; icon: any; color: string }> = 
 
 
 const DashboardLayout = ({ children }: { children: ReactNode }) => {
-  const { profile, role, signOut } = useAuth();
-  const roleInfo = role ? roleLabels[role] : null;
+  const { profile, role, hierarchyScope, signOut } = useAuth();
+  const displayRole = role === 'super_admin' ? role : hierarchyScope?.role ?? role;
+  const roleInfo = displayRole ? roleLabels[displayRole] : null;
 
   return (
     <div className="min-h-screen bg-background">

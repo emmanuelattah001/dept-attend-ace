@@ -1,6 +1,7 @@
-import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
+import { createContext, useContext, useEffect, useState, useRef, ReactNode } from 'react';
 import { Session, User } from '@supabase/supabase-js';
 import { supabase } from '@/integrations/supabase/client';
+import type { HierarchyScope } from '@/lib/hierarchy';
 
 type AppRole = 'super_admin' | 'dept_admin' | 'student' | 'lecturer' | 'course_rep' | 'hod';
 
@@ -17,6 +18,7 @@ interface AuthContextType {
   user: User | null;
   profile: Profile | null;
   role: AppRole | null;
+  hierarchyScope: HierarchyScope | null;
   loading: boolean;
   signOut: () => Promise<void>;
 }
@@ -26,6 +28,7 @@ const AuthContext = createContext<AuthContextType>({
   user: null,
   profile: null,
   role: null,
+  hierarchyScope: null,
   loading: true,
   signOut: async () => {},
 });
@@ -35,15 +38,24 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [role, setRole] = useState<AppRole | null>(null);
+  const [hierarchyScope, setHierarchyScope] = useState<HierarchyScope | null>(null);
   const [loading, setLoading] = useState(true);
+  const requestVersion = useRef(0);
 
   const fetchUserData = async (userId: string) => {
-    const [profileRes, roleRes] = await Promise.all([
+    const version = ++requestVersion.current;
+    setLoading(true);
+    const [profileRes, roleRes, scopeRes] = await Promise.all([
       supabase.from('profiles').select('*').eq('user_id', userId).single(),
       supabase.from('user_roles').select('role').eq('user_id', userId).single(),
+      supabase.from('hierarchy_memberships').select('role,institution_id,faculty_id').eq('user_id', userId).maybeSingle(),
     ]);
-    if (profileRes.data) setProfile(profileRes.data as Profile);
-    if (roleRes.data) setRole(roleRes.data.role as AppRole);
+    if (version !== requestVersion.current) return;
+    setProfile(profileRes.data as Profile | null);
+    setRole(roleRes.data?.role as AppRole ?? null);
+    const scope = scopeRes.data;
+    setHierarchyScope(scope && (scope.role === 'institution_admin' || scope.role === 'faculty_admin') ? { ...scope, role: scope.role } : null);
+    setLoading(false);
   };
 
   useEffect(() => {
@@ -52,12 +64,15 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         setSession(session);
         setUser(session?.user ?? null);
         if (session?.user) {
+          setLoading(true);
           setTimeout(() => fetchUserData(session.user.id), 0);
         } else {
+          requestVersion.current++;
           setProfile(null);
           setRole(null);
+          setHierarchyScope(null);
+          setLoading(false);
         }
-        setLoading(false);
       }
     );
 
@@ -66,8 +81,9 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       setUser(session?.user ?? null);
       if (session?.user) {
         fetchUserData(session.user.id);
+      } else {
+        setLoading(false);
       }
-      setLoading(false);
     });
 
     return () => subscription.unsubscribe();
@@ -77,10 +93,11 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     await supabase.auth.signOut();
     setProfile(null);
     setRole(null);
+    setHierarchyScope(null);
   };
 
   return (
-    <AuthContext.Provider value={{ session, user, profile, role, loading, signOut }}>
+    <AuthContext.Provider value={{ session, user, profile, role, hierarchyScope, loading, signOut }}>
       {children}
     </AuthContext.Provider>
   );
