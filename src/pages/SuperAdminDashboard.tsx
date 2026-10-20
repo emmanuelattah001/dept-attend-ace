@@ -10,6 +10,7 @@ import { Plus, Building2, Users, CalendarCheck, Download, UserCog } from 'lucide
 import DashboardLayout from '@/components/DashboardLayout';
 import { ProgressSummary } from '@/components/ProgressSummary';
 import LoadingScreen from '@/components/LoadingScreen';
+import { HierarchyManager } from './HierarchyDashboard';
 
 interface Department {
   id: string;
@@ -50,7 +51,7 @@ const SuperAdminDashboard = () => {
   const [selectedUser, setSelectedUser] = useState('');
   const [selectedDept, setSelectedDept] = useState('');
   const [selectedRole, setSelectedRole] = useState('');
-  const [activeTab, setActiveTab] = useState<'departments' | 'users' | 'attendance'>('departments');
+  const [activeTab, setActiveTab] = useState<'hierarchy' | 'departments' | 'users' | 'attendance'>('hierarchy');
   const [filterDept, setFilterDept] = useState<string>('all');
   const [filterDate, setFilterDate] = useState<string>('');
   const [initialLoading, setInitialLoading] = useState(true);
@@ -217,6 +218,7 @@ const SuperAdminDashboard = () => {
   };
 
   const tabs = [
+    { key: 'hierarchy' as const, label: 'Institutions', icon: Building2 },
     { key: 'departments' as const, label: 'Departments', icon: Building2 },
     { key: 'users' as const, label: 'Manage Users', icon: Users },
     { key: 'attendance' as const, label: 'All Attendance', icon: CalendarCheck },
@@ -244,9 +246,9 @@ const SuperAdminDashboard = () => {
         <ProgressSummary />
 
 
-        <div className="flex gap-2 border-b">
+        <div className="flex gap-2 border-b overflow-x-auto">
           {tabs.map(tab => (
-            <button
+            <Button variant="ghost"
               key={tab.key}
               onClick={() => setActiveTab(tab.key)}
               className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${
@@ -257,9 +259,11 @@ const SuperAdminDashboard = () => {
             >
               <tab.icon className="w-4 h-4" />
               {tab.label}
-            </button>
+            </Button>
           ))}
         </div>
+
+        {activeTab === 'hierarchy' && <HierarchyManager />}
 
         {activeTab === 'departments' && (
           <Card>
