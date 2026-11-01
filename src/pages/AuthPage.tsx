@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { toast } from 'sonner';
-import { ClipboardCheck, ArrowLeft, GraduationCap, Shield } from 'lucide-react';
+import { ClipboardCheck, ArrowLeft, GraduationCap, Shield, Presentation } from 'lucide-react';
 
 const SYNTHETIC_DOMAIN = 'students.attendtrack.app';
 const matricToEmail = (matric: string) =>
@@ -16,7 +16,7 @@ const AuthPage = () => {
   const [params] = useSearchParams();
   const nextPath = params.get('next') || '/';
 
-  const [mode, setMode] = useState<'student' | 'admin'>('student');
+  const [mode, setMode] = useState<'student' | 'lecturer' | 'admin'>('student');
   const [isLogin, setIsLogin] = useState(true);
   const [email, setEmail] = useState('');
   const [matricNo, setMatricNo] = useState('');
@@ -97,7 +97,7 @@ const AuthPage = () => {
           <CardDescription>{isLogin ? 'Sign in to your account' : 'Create a new account'}</CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="grid grid-cols-2 gap-2 mb-5 p-1 bg-muted rounded-lg">
+          <div className="grid grid-cols-3 gap-2 mb-5 p-1 bg-muted rounded-lg">
             <button
               onClick={() => setMode('student')}
               className={`flex items-center justify-center gap-1.5 py-2 rounded-md text-sm font-medium transition ${mode === 'student' ? 'bg-background shadow' : 'text-muted-foreground'}`}
@@ -105,10 +105,16 @@ const AuthPage = () => {
               <GraduationCap className="w-4 h-4" /> Student
             </button>
             <button
+              onClick={() => setMode('lecturer')}
+              className={`flex items-center justify-center gap-1.5 py-2 rounded-md text-sm font-medium transition ${mode === 'lecturer' ? 'bg-background shadow' : 'text-muted-foreground'}`}
+            >
+              <Presentation className="w-4 h-4" /> Lecturer
+            </button>
+            <button
               onClick={() => setMode('admin')}
               className={`flex items-center justify-center gap-1.5 py-2 rounded-md text-sm font-medium transition ${mode === 'admin' ? 'bg-background shadow' : 'text-muted-foreground'}`}
             >
-              <Shield className="w-4 h-4" /> Course Rep / Admin
+              <Shield className="w-4 h-4" /> Admin
             </button>
           </div>
 
