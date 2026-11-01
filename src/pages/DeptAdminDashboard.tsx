@@ -49,6 +49,7 @@ import {
   Loader2,
   QrCode,
   KeyRound,
+  Smartphone,
   Copy,
   ShieldCheck,
 } from "lucide-react";
@@ -128,7 +129,7 @@ const DeptAdminDashboard = () => {
   >([]);
   const [loginEventsLoading, setLoginEventsLoading] = useState(false);
   const [loginEventFilter, setLoginEventFilter] = useState<
-    "all" | "success" | "blocked_already_used" | "reset"
+    "all" | "success" | "blocked_already_used" | "reset" | "device_reset"
   >("all");
   const [loginEventSearch, setLoginEventSearch] = useState("");
   const [historySource, setHistorySource] = useState<"local" | "sheet">(
@@ -1609,6 +1610,37 @@ const DeptAdminDashboard = () => {
     }
   };
 
+  const [resettingDeviceId, setResettingDeviceId] = useState<string | null>(
+    null,
+  );
+  const resetSingleStudentDevice = async (
+    studentId: string,
+    studentName: string,
+  ) => {
+    if (
+      !confirm(
+        `Reset the device lock for ${studentName}? They can sign in again from a new phone, and their phone will be re-bound at the next scan.`,
+      )
+    )
+      return;
+    setResettingDeviceId(studentId);
+    try {
+      const { data, error } = await supabase.functions.invoke(
+        "provision-student-auth",
+        {
+          body: { action: "reset_device", student_id: studentId },
+        },
+      );
+      if (error || (data as any)?.error)
+        throw new Error((data as any)?.error || error?.message);
+      toast.success(`Device lock reset for ${studentName}.`);
+    } catch (e: any) {
+      toast.error(e.message ?? "Failed to reset device");
+    } finally {
+      setResettingDeviceId(null);
+    }
+  };
+
   if (initialLoading) {
     return <LoadingScreen message="Loading dashboard..." />;
   }
@@ -2383,6 +2415,24 @@ const DeptAdminDashboard = () => {
                                 <Button
                                   variant="ghost"
                                   size="icon"
+                                  title="Reset device lock (new phone)"
+                                  onClick={() =>
+                                    resetSingleStudentDevice(
+                                      student.id,
+                                      student.name,
+                                    )
+                                  }
+                                  disabled={resettingDeviceId === student.id}
+                                >
+                                  {resettingDeviceId === student.id ? (
+                                    <Loader2 className="w-4 h-4 animate-spin" />
+                                  ) : (
+                                    <Smartphone className="w-4 h-4" />
+                                  )}
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
                                   onClick={() =>
                                     deleteStudent(student.id, student.name)
                                   }
@@ -2723,6 +2773,9 @@ const DeptAdminDashboard = () => {
                       Blocked (already used)
                     </SelectItem>
                     <SelectItem value="reset">Admin resets</SelectItem>
+                    <SelectItem value="device_reset">
+                      Device resets
+                    </SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -2776,11 +2829,13 @@ const DeptAdminDashboard = () => {
                         success: "bg-green-100 text-green-700",
                         blocked_already_used: "bg-red-100 text-red-700",
                         reset: "bg-amber-100 text-amber-700",
+                        device_reset: "bg-blue-100 text-blue-700",
                       };
                       const labels: Record<string, string> = {
                         success: "Signed in",
                         blocked_already_used: "Blocked",
                         reset: "Admin reset",
+                        device_reset: "Device reset",
                       };
                       return rows.map((ev, idx) => {
                         const stu = students.find(
