@@ -27,12 +27,12 @@ Deno.serve(async (req) => {
     const token = String(body?.token ?? '').trim();
     if (!token) return new Response(JSON.stringify({ error: 'Missing token' }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
 
-    // Confirm a staff role — lecturers and course reps may end sessions they host
+    // Ending a session also marks non-attendees absent department-wide, so this is admin-only.
     const { data: roles } = await admin.from('user_roles').select('role').eq('user_id', user.id);
     const isAdmin = (roles ?? []).some((r: any) =>
-      ['dept_admin', 'super_admin', 'lecturer', 'course_rep', 'hod'].includes(r.role),
+      ['dept_admin', 'super_admin', 'hod'].includes(r.role),
     );
-    if (!isAdmin) return new Response(JSON.stringify({ error: 'Not authorized' }), { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    if (!isAdmin) return new Response(JSON.stringify({ error: 'Only department administrators may close a session and mark absences.' }), { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
 
     // Load session
     const { data: session, error: sErr } = await admin

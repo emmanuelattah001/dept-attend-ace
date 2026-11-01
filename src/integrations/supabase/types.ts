@@ -669,6 +669,15 @@ export type Database = {
           status: string
         }[]
       }
+      get_attendance_by_matric_institution: {
+        Args: { _institution_id: string; _matric_no: string }
+        Returns: {
+          attendance_date: string
+          department_name: string
+          status: Database["public"]["Enums"]["attendance_status"]
+        }[]
+      }
+      current_user_institution: { Args: never; Returns: string }
       get_user_department: { Args: { _user_id: string }; Returns: string }
       has_role: {
         Args: {
@@ -678,6 +687,19 @@ export type Database = {
         Returns: boolean
       }
       is_dept_staff: { Args: { _user_id: string }; Returns: boolean }
+      list_attendance_institutions: {
+        Args: never
+        Returns: { id: string; name: string }[]
+      }
+      set_course_staff_assignment: {
+        Args: {
+          _assigned: boolean
+          _course_id: string
+          _staff_role: string
+          _user_id: string
+        }
+        Returns: undefined
+      }
       student_change_initial_password: {
         Args: { _password: string }
         Returns: undefined

@@ -122,7 +122,7 @@ async function overwriteTab(token: string, sid: string, tab: string, header: str
 }
 
 // ---------- attendance fetch ----------
-async function fetchAttendance(admin: any, action: string, ids?: string[]) {
+async function fetchAttendance(admin: any, action: string, departmentIds: string[], ids?: string[]) {
   const pageSize = 1000;
   let from = 0;
   const all: any[] = [];
@@ -133,6 +133,7 @@ async function fetchAttendance(admin: any, action: string, ids?: string[]) {
       .range(from, from + pageSize - 1);
     if (action === 'append' && Array.isArray(ids) && ids.length) query = query.in('id', ids);
     else if (action === 'sync_unsynced') query = query.eq('synced_to_sheets', false);
+    query = query.in('department_id', departmentIds);
     const { data, error } = await query;
     if (error) throw error;
     all.push(...(data ?? []));
@@ -185,21 +186,99 @@ Deno.serve(async (req) => {
     const body = await req.json().catch(() => ({}));
     const action: 'append' | 'sync_unsynced' | 'export_all' | 'lookup_by_matric' | 'read_all' = body.action || 'sync_unsynced';
 
-    const saJson = Deno.env.get('GOOGLE_SERVICE_ACCOUNT_JSON');
-    if (!saJson) throw new Error('GOOGLE_SERVICE_ACCOUNT_JSON not configured');
-    const sa = JSON.parse(saJson);
     const admin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
-    const token = await getAccessToken(sa);
+    const caller = await getCaller(req, admin);
+    const isLookup = action === 'lookup_by_matric';
+    const isSuper = caller.isService || caller.roles.includes('super_admin');
+    let verifiedStudent: { matric_no: string | null; department_id: string } | null = null;
+    if (isLookup) {
+      if (!caller.userId) return new Response(JSON.stringify({ ok: false, error: 'Sign in with your student account to view attendance.' }), { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      const { data: student, error: studentError } = await admin
+        .from('students')
+        .select('matric_no, department_id')
+        .eq('auth_user_id', caller.userId)
+        .maybeSingle();
+      if (studentError) throw studentError;
+      if (!student || String(student.matric_no ?? '').trim().toLowerCase() !== String(body.matric_no ?? '').trim().toLowerCase()) {
+        return new Response(JSON.stringify({ ok: false, error: 'You can only view attendance linked to your student account.' }), { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      }
+      verifiedStudent = student;
+    }
+    if (!isLookup) {
+      if (caller.anonymous) return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      const needed = action === 'read_all' ? STAFF_ROLES : ADMIN_ROLES;
+      if (!hasAnyRole(caller, needed)) return new Response(JSON.stringify({ error: 'Forbidden' }), { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    }
 
-    const { data: settingRow } = await admin.from('app_settings').select('value').eq('key', 'google_sheet_id').maybeSingle();
-    const sid: string | undefined = (settingRow?.value as any)?.id ?? Deno.env.get('GOOGLE_SHEET_ID') ?? undefined;
-    if (!sid) throw new Error('GOOGLE_SHEET_ID not configured. Set the secret or app_settings.google_sheet_id.');
+    let institutionId = caller.institutionId;
+    if (isLookup && verifiedStudent) {
+      const { data: department, error: departmentError } = await admin
+        .from('departments')
+        .select('faculty_id')
+        .eq('id', verifiedStudent.department_id)
+        .maybeSingle();
+      if (departmentError) throw departmentError;
+      const { data: faculty, error: facultyError } = department?.faculty_id
+        ? await admin.from('faculties').select('institution_id').eq('id', department.faculty_id).maybeSingle()
+        : { data: null, error: null };
+      if (facultyError) throw facultyError;
+      institutionId = faculty?.institution_id ?? null;
+      if (body.institution_id && body.institution_id !== institutionId) {
+        return new Response(JSON.stringify({ error: 'You can only access your own institution’s archive.' }), { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      }
+    } else if (caller.anonymous || isSuper) {
+      institutionId = String(body.institution_id ?? '').trim() || null;
+    } else if (body.institution_id && body.institution_id !== institutionId) {
+      return new Response(JSON.stringify({ error: 'You cannot access another institution’s archive.' }), { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    }
+    if (!institutionId) {
+      return new Response(JSON.stringify({ error: 'An institution must be selected for archive access.' }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    }
 
-    // public lookup: read-only, exact matric, no writes to Google, rate limited
-    if (action === 'lookup_by_matric') {
+    const { data: institution, error: institutionError } = await admin
+      .from('institutions')
+      .select('id')
+      .eq('id', institutionId)
+      .eq('status', 'active')
+      .maybeSingle();
+    if (institutionError) throw institutionError;
+    if (!institution) return new Response(JSON.stringify({ error: 'Institution is not active or does not exist.' }), { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+
+    const { data: integration, error: integrationError } = await admin
+      .from('institution_integrations')
+      .select('google_sheet_id')
+      .eq('institution_id', institutionId)
+      .maybeSingle();
+    if (integrationError) throw integrationError;
+    const sid: string | undefined = integration?.google_sheet_id;
+    if (!sid) return new Response(JSON.stringify({ ok: false, error: 'This institution’s separate attendance archive has not been configured.' }), { status: 409, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+
+    const { data: faculties, error: facultyError } = await admin
+      .from('faculties')
+      .select('id')
+      .eq('institution_id', institutionId);
+    if (facultyError) throw facultyError;
+    const facultyIds = (faculties ?? []).map((faculty: any) => faculty.id);
+    const { data: departments, error: departmentError } = facultyIds.length
+      ? await admin.from('departments').select('id').in('faculty_id', facultyIds)
+      : { data: [], error: null };
+    if (departmentError) throw departmentError;
+    const departmentIds = (departments ?? []).map((department: any) => department.id);
+
+    if (isLookup) {
       if (rateLimited(`lookup:${clientIp(req)}`, 30)) return new Response(JSON.stringify({ ok: false, error: 'Too many requests' }), { status: 429, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
       const matric = String(body.matric_no ?? '').trim().toLowerCase();
       if (!matric || matric.length < 4) return new Response(JSON.stringify({ ok: false, error: 'matric_no required' }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    }
+
+    const saJson = Deno.env.get('GOOGLE_SERVICE_ACCOUNT_JSON');
+    if (!saJson) throw new Error('GOOGLE_SERVICE_ACCOUNT_JSON not configured');
+    const sa = JSON.parse(saJson);
+    const token = await getAccessToken(sa);
+
+    // public lookup: read-only, exact matric, no writes to Google, rate limited
+    if (action === 'lookup_by_matric') {
+      const matric = String(body.matric_no ?? '').trim().toLowerCase();
       const all = await readAttendanceRows(token, sid);
       const rows = all.filter(r => (r[2] ?? '').toLowerCase() === matric).map(r => ({
         attendance_id: r[0], student_name: r[1], matric_no: r[2], gender: r[3], department: r[4],
@@ -208,16 +287,9 @@ Deno.serve(async (req) => {
       return new Response(JSON.stringify({ ok: true, rows }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
-    // every other action requires a signed-in staff member (or the service role)
-    const caller = await getCaller(req, admin);
-    if (caller.anonymous) return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
-    const needed = action === 'read_all' ? STAFF_ROLES : ADMIN_ROLES;
-    if (!hasAnyRole(caller, needed)) return new Response(JSON.stringify({ error: 'Forbidden' }), { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
-
     await ensureTabs(token, sid);
 
     if (action === 'read_all') {
-      const isSuper = caller.isService || caller.roles.includes('super_admin');
       let deptName: string | null = null;
       if (!isSuper && caller.departmentId) {
         const { data: dept } = await admin.from('departments').select('name').eq('id', caller.departmentId).maybeSingle();
@@ -238,7 +310,9 @@ Deno.serve(async (req) => {
       if (!Array.isArray(body.ids) || !body.ids.length) return new Response(JSON.stringify({ error: 'ids required' }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
-    const dbRows = await fetchAttendance(admin, action, body.ids);
+    const dbRows = departmentIds.length
+      ? await fetchAttendance(admin, action, departmentIds, body.ids)
+      : [];
     console.log(`sheets-sync[${action}]: fetched ${dbRows.length} rows`);
 
     // marker names

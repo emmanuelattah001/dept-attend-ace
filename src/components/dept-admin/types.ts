@@ -5,4 +5,4 @@ export interface DepartmentCourse {
   department_id: string;
 }
 
-export type DepartmentAdminTab = "mark" | "history" | "students" | "logins";
+export type DepartmentAdminTab = "mark" | "history" | "students" | "logins" | "staff";

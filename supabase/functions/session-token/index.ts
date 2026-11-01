@@ -35,16 +35,33 @@ Deno.serve(async (req) => {
       .maybeSingle();
     if (!session) return json({ error: 'Session not found' }, 404);
 
-    // Only the creator, department staff, or a super admin may read the code.
-    let allowed = session.created_by === user.id;
-    if (!allowed) {
-      const { data: roles } = await admin.from('user_roles').select('role').eq('user_id', user.id);
-      const set = new Set((roles ?? []).map((r: any) => r.role));
-      if (set.has('super_admin')) allowed = true;
-      else if (set.has('dept_admin') || set.has('lecturer') || set.has('course_rep') || set.has('hod')) {
-        const { data: prof } = await admin.from('profiles').select('department_id').eq('user_id', user.id).maybeSingle();
-        allowed = prof?.department_id === session.department_id;
-      }
+    // Only authorized department staff may read the code, even when they created it.
+    const { data: roles, error: roleError } = await admin.from('user_roles').select('role').eq('user_id', user.id);
+    if (roleError) throw roleError;
+    const roleSet = new Set((roles ?? []).map((row: any) => row.role));
+    let allowed = roleSet.has('super_admin');
+    if (!allowed && (roleSet.has('dept_admin') || roleSet.has('hod'))) {
+      const { data: prof, error: profileError } = await admin
+        .from('profiles')
+        .select('department_id')
+        .eq('user_id', user.id)
+        .maybeSingle();
+      if (profileError) throw profileError;
+      allowed = prof?.department_id === session.department_id;
+    }
+    if (!allowed && (roleSet.has('lecturer') || roleSet.has('course_rep'))) {
+      const staffRoles = ['lecturer', 'course_rep'].filter((role) => roleSet.has(role));
+      const { data: assignment, error: assignmentError } = await admin
+        .from('course_staff')
+        .select('staff_role')
+        .eq('user_id', user.id)
+        .eq('course_id', session.course_id)
+        .eq('department_id', session.department_id)
+        .in('staff_role', staffRoles)
+        .limit(1)
+        .maybeSingle();
+      if (assignmentError) throw assignmentError;
+      allowed = Boolean(assignment);
     }
     if (!allowed) return json({ error: 'Not allowed' }, 403);
 

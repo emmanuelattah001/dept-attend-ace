@@ -23,18 +23,26 @@ Deno.serve(async (req) => {
     const hours = Math.max(1, Number(Deno.env.get('RETENTION_HOURS') ?? 24) || 24);
     const cutoff = new Date(Date.now() - hours * 60 * 60 * 1000).toISOString();
 
-    // Push anything unsynced first. If this fails we ABORT: deleting only synced rows is safe,
-    // but we don't want to run silently while sync is broken.
+    // Sync each configured tenant before pruning records that have reached its archive.
+    const [{ data: activeInstitutions, error: institutionError }, { data: integrations, error: integrationError }] = await Promise.all([
+      admin.from('institutions').select('id').eq('status', 'active'),
+      admin.from('institution_integrations').select('institution_id'),
+    ]);
+    if (institutionError) throw institutionError;
+    if (integrationError) throw integrationError;
+    const configuredInstitutions = new Set((integrations ?? []).map((integration) => integration.institution_id));
     const syncUrl = `${Deno.env.get('SUPABASE_URL')}/functions/v1/sheets-sync`;
-    const syncResp = await fetch(syncUrl, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ action: 'sync_unsynced' }),
-    }).catch((e) => ({ ok: false, status: 0, text: async () => String(e) }) as any);
-    if (!syncResp.ok) console.log('pre-cleanup sync failed (continuing, only synced rows are deleted):', syncResp.status);
+    for (const { id: institutionId } of (activeInstitutions ?? []).filter((institution) => configuredInstitutions.has(institution.id))) {
+      const syncResp = await fetch(syncUrl, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ action: 'sync_unsynced', institution_id: institutionId }),
+      }).catch((e) => ({ ok: false, status: 0, text: async () => String(e) }) as any);
+      if (!syncResp.ok) console.log('pre-cleanup institution sync failed; retaining unsynced rows:', syncResp.status);
+    }
 
     const { data, error } = await admin
       .from('attendance')

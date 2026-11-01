@@ -4,6 +4,7 @@ import type { Tables } from '@/integrations/supabase/types';
 import { useAuth } from '@/hooks/useAuth';
 import { hierarchyPermissions } from '@/lib/hierarchy';
 import DashboardLayout from '@/components/DashboardLayout';
+import { SheetsSettingsDialog } from '@/components/SheetsSettingsDialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -18,13 +19,13 @@ export function HierarchyManager() {
   const [faculties, setFaculties] = useState<Tables<'faculties'>[]>([]);
   const [departments, setDepartments] = useState<Tables<'departments'>[]>([]);
   const [memberships, setMemberships] = useState<Tables<'hierarchy_memberships'>[]>([]);
-  const [profiles, setProfiles] = useState<{ user_id: string; name: string }[]>([]);
+  const [profiles, setProfiles] = useState<{ user_id: string; name: string; department_id: string | null }[]>([]);
   const [institutionId, setInstitutionId] = useState(hierarchyScope?.institution_id ?? '');
   const [facultyId, setFacultyId] = useState(hierarchyScope?.faculty_id ?? '');
   const [institutionName, setInstitutionName] = useState('');
   const [facultyName, setFacultyName] = useState('');
   const [departmentName, setDepartmentName] = useState('');
-  const [legacyDepartment, setLegacyDepartment] = useState('');
+  const [departmentToMove, setDepartmentToMove] = useState('');
   const [userId, setUserId] = useState('');
   const [adminRole, setAdminRole] = useState<'institution_admin' | 'faculty_admin'>('institution_admin');
   const [busy, setBusy] = useState(false);
@@ -44,13 +45,19 @@ export function HierarchyManager() {
     setDepartments(d.data ?? []); setMemberships(m.data ?? []);
     setInstitutionId(current => current || i.data?.[0]?.id || '');
     if (platform) {
-      const p = await supabase.from('profiles').select('user_id,name').order('name');
+      const p = await supabase.from('profiles').select('user_id,name,department_id').order('name');
       if (p.error) setLoadError(p.error.message); else setProfiles(p.data ?? []);
     }
   }, [platform]);
   useEffect(() => { void load().catch(error => setLoadError(String(error))); }, [load]);
 
   const institution = institutions.find(i => i.id === institutionId);
+  const assignableProfiles = profiles.filter(profile => {
+    if (!profile.department_id) return true;
+    const profileDepartment = departments.find(department => department.id === profile.department_id);
+    const profileFaculty = faculties.find(faculty => faculty.id === profileDepartment?.faculty_id);
+    return profileFaculty?.institution_id === institutionId;
+  });
   const permissions = hierarchyPermissions(platform, hierarchyScope, institutionId, facultyId, institution?.status === 'active');
   const visibleFaculties = faculties.filter(f => f.institution_id === institutionId);
   const visibleDepartments = departments.filter(d => d.faculty_id && visibleFaculties.some(f => f.id === d.faculty_id) && (!facultyId || d.faculty_id === facultyId));
@@ -85,17 +92,18 @@ export function HierarchyManager() {
       <div className="space-y-2"><Label>Faculty</Label><Select value={facultyId || 'all'} onValueChange={value => setFacultyId(value === 'all' ? '' : value)}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="all">All accessible faculties</SelectItem>{visibleFaculties.map(f => <SelectItem key={f.id} value={f.id}>{f.name}</SelectItem>)}</SelectContent></Select></div>
     </div>
     {institution && <div className="flex flex-wrap justify-between items-center gap-3 border-b pb-4"><h3 className="font-semibold flex gap-2 items-center"><Building2 className="h-5 w-5 text-primary" />{institution.name}</h3>{platform ? <Select value={institution.status} onValueChange={status => void run(async () => { const { error } = await supabase.from('institutions').update({ status }).eq('id', institution.id); if (error) throw error; }, 'Institution status updated')} disabled={busy}><SelectTrigger className="w-40"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="active">Active</SelectItem><SelectItem value="suspended">Suspended</SelectItem><SelectItem value="inactive">Inactive</SelectItem></SelectContent></Select> : <span className="text-sm text-muted-foreground">{institution.status}</span>}</div>}
+    {institution && (platform || hierarchyScope?.role === 'institution_admin') && <section className="flex flex-wrap items-center justify-between gap-3 rounded-lg border p-4"><div><h3 className="font-semibold">Institution attendance archive</h3><p className="text-sm text-muted-foreground">Configure a separate Google Sheet for this institution.</p></div><SheetsSettingsDialog institutionId={institution.id} /></section>}
     {!institution && !loadError && <p className="text-muted-foreground">No institution assigned.</p>}
     {permissions.manageFaculties && institutionId && <form className="flex flex-wrap gap-2" onSubmit={e => { e.preventDefault(); void run(async () => { const { data, error } = await supabase.from('faculties').insert({ name: facultyName.trim(), institution_id: institutionId }).select().single(); if (error) throw error; setFacultyName(''); setFacultyId(data.id); }, 'Faculty created'); }}><Input aria-label="Faculty name" placeholder="Faculty name" required maxLength={200} value={facultyName} onChange={e => setFacultyName(e.target.value)} className="flex-1 min-w-48" /><Button disabled={busy || !facultyName.trim()}><Plus />Add Faculty</Button></form>}
     <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{visibleFaculties.filter(f => !facultyId || f.id === facultyId).map(f => <div key={f.id} className="rounded-md border p-4 space-y-2"><GraduationCap className="h-5 w-5 text-accent" /><h3 className="font-semibold break-words">{f.name}</h3><p className="text-sm text-muted-foreground">{departments.filter(d => d.faculty_id === f.id).length} departments</p><Button variant="link" className="p-0" onClick={() => setFacultyId(f.id)}>View departments</Button></div>)}</div>
     <section className="space-y-4"><h3 className="text-lg font-semibold">Departments</h3>
       {permissions.manageDepartments && facultyId && <form className="flex flex-wrap gap-2" onSubmit={e => { e.preventDefault(); void run(async () => { const { error } = await supabase.from('departments').insert({ name: departmentName.trim(), faculty_id: facultyId }); if (error) throw error; setDepartmentName(''); }, 'Department created'); }}><Input aria-label="Department name" placeholder="Department name" required value={departmentName} onChange={e => setDepartmentName(e.target.value)} className="flex-1 min-w-48" /><Button disabled={busy || !departmentName.trim()}><Plus />Add Department</Button></form>}
-      {platform && facultyId && <div className="flex flex-wrap gap-2"><Select value={legacyDepartment} onValueChange={setLegacyDepartment}><SelectTrigger className="flex-1 min-w-48"><SelectValue placeholder="Unassigned existing department" /></SelectTrigger><SelectContent>{departments.filter(d => !d.faculty_id).map(d => <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>)}</SelectContent></Select><Button variant="outline" disabled={busy || !legacyDepartment} onClick={() => { if (!window.confirm('Link this department to the selected faculty? Existing attendance and students stay with it.')) return; void run(async () => { const { error } = await supabase.from('departments').update({ faculty_id: facultyId }).eq('id', legacyDepartment).is('faculty_id', null); if (error) throw error; setLegacyDepartment(''); }, 'Department linked'); }}>Link Department</Button></div>}
+      {platform && facultyId && <div className="flex flex-wrap gap-2"><Select value={departmentToMove} onValueChange={setDepartmentToMove}><SelectTrigger className="flex-1 min-w-48"><SelectValue placeholder="Department from another faculty" /></SelectTrigger><SelectContent>{departments.filter(d => d.faculty_id !== facultyId).map(d => { const sourceFaculty = faculties.find(f => f.id === d.faculty_id); const sourceInstitution = institutions.find(i => i.id === sourceFaculty?.institution_id); return <SelectItem key={d.id} value={d.id}>{d.name} · {sourceInstitution?.name ?? 'Unassigned'} / {sourceFaculty?.name ?? 'No faculty'}</SelectItem>; })}</SelectContent></Select><Button variant="outline" disabled={busy || !departmentToMove} onClick={() => { const selected = departments.find(d => d.id === departmentToMove); const sourceFaculty = faculties.find(f => f.id === selected?.faculty_id); const sourceInstitution = institutions.find(i => i.id === sourceFaculty?.institution_id); if (!selected || !window.confirm(`Move ${selected.name} from ${sourceInstitution?.name ?? 'Unassigned'} / ${sourceFaculty?.name ?? 'No faculty'} to ${faculties.find(f => f.id === facultyId)?.name}? Existing department IDs, attendance, students, and courses will stay linked.`)) return; void run(async () => { const { error } = await supabase.from('departments').update({ faculty_id: facultyId }).eq('id', selected.id); if (error) throw error; setDepartmentToMove(''); }, 'Department moved'); }}>Move Department</Button></div>}
       <div className="divide-y">{visibleDepartments.map(d => <div className="flex flex-wrap justify-between gap-2 py-3" key={d.id}><span className="font-medium">{d.name}</span><span className="text-sm text-muted-foreground">{faculties.find(f => f.id === d.faculty_id)?.name}</span></div>)}</div>
       {visibleDepartments.length === 0 && <p className="text-sm text-muted-foreground">No departments in this selection.</p>}
     </section>
     {platform && <section className="border-t pt-5 space-y-4"><h3 className="text-lg font-semibold flex items-center gap-2"><ShieldCheck className="h-5 w-5 text-primary" />Administrator Assignments</h3>
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3"><Select value={userId} onValueChange={setUserId}><SelectTrigger><SelectValue placeholder="Select registered user" /></SelectTrigger><SelectContent>{profiles.map(p => <SelectItem key={p.user_id} value={p.user_id}>{p.name}</SelectItem>)}</SelectContent></Select><Select value={adminRole} onValueChange={v => setAdminRole(v === 'faculty_admin' ? v : 'institution_admin')}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="institution_admin">Institution Admin</SelectItem><SelectItem value="faculty_admin">Faculty Admin</SelectItem></SelectContent></Select><Button disabled={busy || !userId || !institutionId || (adminRole === 'faculty_admin' && !facultyId)} onClick={() => void run(async () => { const { error } = await supabase.from('hierarchy_memberships').upsert({ user_id: userId, role: adminRole, institution_id: institutionId, faculty_id: adminRole === 'faculty_admin' ? facultyId : null }, { onConflict: 'user_id' }); if (error) throw error; setUserId(''); }, 'Administrator assigned')}>Assign Administrator</Button></div>
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3"><Select value={userId} onValueChange={setUserId}><SelectTrigger><SelectValue placeholder="Select registered user" /></SelectTrigger><SelectContent>{assignableProfiles.map(p => <SelectItem key={p.user_id} value={p.user_id}>{p.name}</SelectItem>)}</SelectContent></Select><Select value={adminRole} onValueChange={v => setAdminRole(v === 'faculty_admin' ? v : 'institution_admin')}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="institution_admin">Institution Admin</SelectItem><SelectItem value="faculty_admin">Faculty Admin</SelectItem></SelectContent></Select><Button disabled={busy || !userId || !institutionId || (adminRole === 'faculty_admin' && !facultyId)} onClick={() => void run(async () => { const { error } = await supabase.from('hierarchy_memberships').upsert({ user_id: userId, role: adminRole, institution_id: institutionId, faculty_id: adminRole === 'faculty_admin' ? facultyId : null }, { onConflict: 'user_id' }); if (error) throw error; setUserId(''); }, 'Administrator assigned')}>Assign Administrator</Button></div>
       <div className="divide-y">{memberships.filter(m => m.institution_id === institutionId).map(m => <div key={m.id} className="flex flex-wrap items-center justify-between gap-2 py-3"><div><p className="font-medium">{profiles.find(p => p.user_id === m.user_id)?.name ?? 'Registered administrator'}</p><p className="text-sm text-muted-foreground">{m.role === 'institution_admin' ? 'Institution Admin' : `Faculty Admin · ${faculties.find(f => f.id === m.faculty_id)?.name ?? ''}`}</p></div><Button variant="outline" size="sm" disabled={busy} onClick={() => { if (!window.confirm('Remove this administrator assignment?')) return; void run(async () => { const { error } = await supabase.from('hierarchy_memberships').delete().eq('id', m.id); if (error) throw error; }, 'Assignment removed'); }}>Remove assignment</Button></div>)}</div>
     </section>}
   </div>;

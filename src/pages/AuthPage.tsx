@@ -14,7 +14,10 @@ const matricToEmail = (matric: string) =>
 const AuthPage = () => {
   const navigate = useNavigate();
   const [params] = useSearchParams();
-  const nextPath = params.get('next') || '/';
+  const requestedNextPath = params.get('next') || '/';
+  const nextPath = requestedNextPath.startsWith('/') && !requestedNextPath.startsWith('//')
+    ? requestedNextPath
+    : '/';
 
   const [mode, setMode] = useState<'student' | 'lecturer' | 'admin'>('student');
   const [isLogin, setIsLogin] = useState(true);

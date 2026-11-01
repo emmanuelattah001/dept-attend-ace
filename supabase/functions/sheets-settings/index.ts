@@ -1,5 +1,4 @@
-// Get/set Google Sheets configuration (spreadsheet ID) and expose the
-// required tab names + column schema so the UI can confirm setup before syncing.
+// Get/set the institution-specific archive and expose its required schema.
 import { createClient } from 'npm:@supabase/supabase-js@2';
 import { corsHeaders } from 'npm:@supabase/supabase-js@2/cors';
 
@@ -52,32 +51,67 @@ Deno.serve(async (req) => {
     if (uerr || !userData?.user) return json({ error: 'Unauthorized' }, 401);
     const uid = userData.user.id;
 
-    const { data: roles } = await admin.from('user_roles').select('role').eq('user_id', uid);
-    const allowed = (roles ?? []).some((r: any) => r.role === 'super_admin' || r.role === 'dept_admin');
-    if (!allowed) return json({ error: 'Forbidden' }, 403);
-
     const body = await req.json().catch(() => ({}));
     const action: 'get' | 'set' = body.action || 'get';
+    const [{ data: roles }, { data: membership }] = await Promise.all([
+      admin.from('user_roles').select('role').eq('user_id', uid),
+      admin.from('hierarchy_memberships').select('institution_id, role').eq('user_id', uid).maybeSingle(),
+    ]);
+    const isSuperAdmin = (roles ?? []).some((row: any) => row.role === 'super_admin');
+    const requestedInstitution = String(body.institutionId ?? '').trim();
+    const institutionId = isSuperAdmin
+      ? requestedInstitution
+      : membership?.role === 'institution_admin'
+        ? membership.institution_id
+        : '';
+    if (!institutionId) {
+      return json({ error: 'Only a super administrator or this institution’s administrator can configure its archive.' }, 403);
+    }
+    if (requestedInstitution && requestedInstitution !== institutionId) {
+      return json({ error: 'You cannot configure another institution’s archive.' }, 403);
+    }
+
+    const { data: institution, error: institutionError } = await admin
+      .from('institutions')
+      .select('id, name, status')
+      .eq('id', institutionId)
+      .maybeSingle();
+    if (institutionError) throw institutionError;
+    if (!institution || institution.status !== 'active') {
+      return json({ error: 'Institution is not active.' }, 404);
+    }
 
     if (action === 'get') {
-      const { data } = await admin.from('app_settings').select('value').eq('key', 'google_sheet_id').maybeSingle();
-      const sheetId = (data?.value as any)?.id ?? Deno.env.get('GOOGLE_SHEET_ID') ?? null;
+      const { data, error } = await admin
+        .from('institution_integrations')
+        .select('google_sheet_id')
+        .eq('institution_id', institutionId)
+        .maybeSingle();
+      if (error) throw error;
+      const sheetId = data?.google_sheet_id ?? null;
       return json({
         ok: true,
+        institutionId,
+        institutionName: institution.name,
         sheetId,
         sheetUrl: sheetId ? `https://docs.google.com/spreadsheets/d/${sheetId}` : null,
         schema: SCHEMA,
         serviceAccountConfigured: !!Deno.env.get('GOOGLE_SERVICE_ACCOUNT_JSON'),
+        canManage: isSuperAdmin || membership?.role === 'institution_admin',
       });
     }
 
     if (action === 'set') {
       const id = extractSheetId(String(body.sheetId ?? ''));
       if (!id) return json({ ok: false, error: 'Invalid spreadsheet ID or URL' }, 400);
-      const { error } = await admin.from('app_settings')
-        .upsert({ key: 'google_sheet_id', value: { id } }, { onConflict: 'key' });
+      const { error } = await admin.from('institution_integrations')
+        .upsert({
+          institution_id: institutionId,
+          google_sheet_id: id,
+          configured_by: uid,
+        }, { onConflict: 'institution_id' });
       if (error) throw error;
-      return json({ ok: true, sheetId: id, sheetUrl: `https://docs.google.com/spreadsheets/d/${id}` });
+      return json({ ok: true, institutionId, sheetId: id, sheetUrl: `https://docs.google.com/spreadsheets/d/${id}` });
     }
 
     return json({ error: 'Unknown action' }, 400);

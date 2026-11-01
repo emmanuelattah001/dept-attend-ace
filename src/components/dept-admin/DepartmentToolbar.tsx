@@ -1,6 +1,5 @@
 import { Button } from "@/components/ui/button";
 import { SheetsActions } from "@/components/SheetsActions";
-import { SheetsSettingsDialog } from "@/components/SheetsSettingsDialog";
 import { KeyRound, Loader2, QrCode, type LucideIcon } from "lucide-react";
 import type { DepartmentAdminTab } from "./types";
 
@@ -41,7 +40,6 @@ export function DepartmentToolbar({
         <Button size="sm" variant="outline" onClick={onProvisionLogins} disabled={provisioningAuth}>{provisioningAuth ? <Loader2 className="h-4 w-4 animate-spin sm:mr-1" /> : <KeyRound className="h-4 w-4 sm:mr-1" />}<span className="hidden sm:inline">Create Student Logins</span><span className="sm:hidden">Create</span></Button>
         <Button size="sm" variant="outline" onClick={onResetLogins} disabled={resettingLogins}>{resettingLogins ? <Loader2 className="h-4 w-4 animate-spin sm:mr-1" /> : <KeyRound className="h-4 w-4 sm:mr-1" />}<span className="hidden sm:inline">Reset Login Lock</span><span className="sm:hidden">Reset</span></Button>
         <SheetsActions busy={sheetsBusy} size="sm" onExport={onExportSheets} onSync={onSyncSheets} />
-        <SheetsSettingsDialog />
       </div>
     </div>
   );

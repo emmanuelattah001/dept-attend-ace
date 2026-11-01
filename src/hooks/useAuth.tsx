@@ -47,12 +47,21 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     setLoading(true);
     const [profileRes, roleRes, scopeRes] = await Promise.all([
       supabase.from('profiles').select('*').eq('user_id', userId).single(),
-      supabase.from('user_roles').select('role').eq('user_id', userId).single(),
+      supabase.from('user_roles').select('role').eq('user_id', userId),
       supabase.from('hierarchy_memberships').select('role,institution_id,faculty_id').eq('user_id', userId).maybeSingle(),
     ]);
     if (version !== requestVersion.current) return;
     setProfile(profileRes.data as Profile | null);
-    setRole(roleRes.data?.role as AppRole ?? null);
+    const rolePriority: AppRole[] = [
+      'super_admin',
+      'dept_admin',
+      'hod',
+      'lecturer',
+      'course_rep',
+      'student',
+    ];
+    const roles = (roleRes.data ?? []).map((row) => row.role as AppRole);
+    setRole(rolePriority.find((candidate) => roles.includes(candidate)) ?? null);
     const scope = scopeRes.data;
     setHierarchyScope(scope && (scope.role === 'institution_admin' || scope.role === 'faculty_admin') ? { ...scope, role: scope.role } : null);
     setLoading(false);

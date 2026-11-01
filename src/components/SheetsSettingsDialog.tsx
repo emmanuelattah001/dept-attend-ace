@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -11,13 +11,16 @@ import { Settings, Loader2, ExternalLink, Check, AlertCircle } from 'lucide-reac
 interface TabSchema { name: string; description: string; columns: string[]; }
 interface SettingsResponse {
   ok: boolean;
+  institutionId: string;
+  institutionName: string;
   sheetId: string | null;
   sheetUrl: string | null;
   schema: { tabs: TabSchema[] };
   serviceAccountConfigured: boolean;
+  canManage: boolean;
 }
 
-export function SheetsSettingsDialog() {
+export function SheetsSettingsDialog({ institutionId }: { institutionId: string }) {
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -25,21 +28,23 @@ export function SheetsSettingsDialog() {
   const [data, setData] = useState<SettingsResponse | null>(null);
   const [input, setInput] = useState('');
 
-  const load = async () => {
+  const load = useCallback(async () => {
     setLoading(true);
     try {
-      const { data: resp, error } = await supabase.functions.invoke('sheets-settings', { body: { action: 'get' } });
+      const { data: resp, error } = await supabase.functions.invoke('sheets-settings', { body: { action: 'get', institutionId } });
       if (error) throw error;
-      setData(resp as SettingsResponse);
-      setInput((resp as SettingsResponse)?.sheetId ?? '');
+      const response = resp as SettingsResponse & { error?: string };
+      if (!response?.ok) throw new Error(response?.error || 'Failed to load institution archive settings');
+      setData(response);
+      setInput(response.sheetId ?? '');
     } catch (e: any) {
       toast.error('Failed to load settings', { description: e?.message });
     } finally {
       setLoading(false);
     }
-  };
+  }, [institutionId]);
 
-  useEffect(() => { if (open) load(); }, [open]);
+  useEffect(() => { if (open) void load(); }, [open, load]);
 
   const save = async () => {
     if (!confirmed) {
@@ -49,7 +54,7 @@ export function SheetsSettingsDialog() {
     setSaving(true);
     try {
       const { data: resp, error } = await supabase.functions.invoke('sheets-settings', {
-        body: { action: 'set', sheetId: input.trim() },
+        body: { action: 'set', institutionId, sheetId: input.trim() },
       });
       if (error) throw error;
       const r = resp as { ok: boolean; sheetId?: string; error?: string };
@@ -74,7 +79,7 @@ export function SheetsSettingsDialog() {
         <DialogHeader>
           <DialogTitle>Google Sheets Configuration</DialogTitle>
           <DialogDescription>
-            Set the spreadsheet ID used for archiving attendance, and confirm the required tab names and columns before syncing.
+            Configure the private attendance archive for {data?.institutionName || "this institution"}. Each institution must use a separate spreadsheet.
           </DialogDescription>
         </DialogHeader>
 
@@ -98,6 +103,7 @@ export function SheetsSettingsDialog() {
                 placeholder="https://docs.google.com/spreadsheets/d/…"
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
+                disabled={!data.canManage}
               />
               {data.sheetUrl && (
                 <a href={data.sheetUrl} target="_blank" rel="noreferrer"
@@ -142,7 +148,7 @@ export function SheetsSettingsDialog() {
 
         <DialogFooter>
           <Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
-          <Button onClick={save} disabled={saving || loading || !input.trim() || !confirmed}>
+          <Button onClick={save} disabled={!data?.canManage || saving || loading || !input.trim() || !confirmed}>
             {saving ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : null}
             Save configuration
           </Button>

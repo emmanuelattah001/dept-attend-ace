@@ -52,6 +52,7 @@ import {
   Smartphone,
   Copy,
   ShieldCheck,
+  BookOpen,
 } from "lucide-react";
 import DashboardLayout from "@/components/DashboardLayout";
 import { ProgressSummary } from "@/components/ProgressSummary";
@@ -61,6 +62,7 @@ import { LocationPicker } from "@/components/LocationPicker";
 import { DashboardHeader } from "@/components/dept-admin/DashboardHeader";
 import { CourseSelector } from "@/components/dept-admin/CourseSelector";
 import { DepartmentToolbar } from "@/components/dept-admin/DepartmentToolbar";
+import { CourseStaffManager } from "@/components/dept-admin/CourseStaffManager";
 import type { DepartmentCourse } from "@/components/dept-admin/types";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
@@ -100,7 +102,7 @@ interface LocalAttendance {
 }
 
 const DeptAdminDashboard = () => {
-  const { profile, user } = useAuth();
+  const { profile, user, role } = useAuth();
   const [students, setStudents] = useState<Student[]>([]);
   const [departmentName, setDepartmentName] = useState<string>("");
   const [courses, setCourses] = useState<DepartmentCourse[]>([]);
@@ -114,7 +116,7 @@ const DeptAdminDashboard = () => {
   const [localAttendance, setLocalAttendance] = useState<LocalAttendance[]>([]);
   const [history, setHistory] = useState<AttendanceRecord[]>([]);
   const [activeTab, setActiveTab] = useState<
-    "mark" | "history" | "students" | "logins"
+    "mark" | "history" | "students" | "logins" | "staff"
   >("mark");
   const [loginEvents, setLoginEvents] = useState<
     Array<{
@@ -1364,6 +1366,9 @@ const DeptAdminDashboard = () => {
     { id: "students" as const, label: "Students", icon: Users },
     { id: "history" as const, label: "History", icon: History },
     { id: "logins" as const, label: "Login Log", icon: ShieldCheck },
+    ...(role === "dept_admin"
+      ? [{ id: "staff" as const, label: "Course Staff", icon: BookOpen }]
+      : []),
   ];
 
   const fetchLoginEvents = async () => {
@@ -2764,6 +2769,13 @@ const DeptAdminDashboard = () => {
                     <Loader2 className="w-4 h-4 mr-1 animate-spin" />
                   ) : (
                     <RefreshCw className="w-4 h-4 mr-1" />
+                  )}
+
+                  {activeTab === "staff" && role === "dept_admin" && (
+                    <CourseStaffManager
+                      departmentId={profile.department_id}
+                      courses={courses}
+                    />
                   )}
                   Refresh
                 </Button>

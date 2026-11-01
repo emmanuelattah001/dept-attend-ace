@@ -10,6 +10,7 @@ export type Caller = {
   userId: string | null;
   roles: string[];
   departmentId: string | null;
+  institutionId: string | null;
 };
 
 export const STAFF_ROLES = ['dept_admin', 'super_admin', 'hod', 'lecturer', 'course_rep'];
@@ -27,7 +28,7 @@ export function makeAdminClient() {
 }
 
 export async function getCaller(req: Request, admin: ReturnType<typeof makeAdminClient>): Promise<Caller> {
-  const anonymous: Caller = { isService: false, anonymous: true, userId: null, roles: [], departmentId: null };
+  const anonymous: Caller = { isService: false, anonymous: true, userId: null, roles: [], departmentId: null, institutionId: null };
   const header = req.headers.get('Authorization') ?? '';
   if (!header.startsWith('Bearer ')) return anonymous;
   const jwt = header.slice(7).trim();
@@ -35,23 +36,33 @@ export async function getCaller(req: Request, admin: ReturnType<typeof makeAdmin
 
   const service = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
   if (service && safeEqual(jwt, service)) {
-    return { isService: true, anonymous: false, userId: null, roles: ['service_role'], departmentId: null };
+    return { isService: true, anonymous: false, userId: null, roles: ['service_role'], departmentId: null, institutionId: null };
   }
 
   const { data, error } = await admin.auth.getUser(jwt);
   if (error || !data?.user) return anonymous; // e.g. the public anon key
   const userId = data.user.id;
 
-  const [{ data: roleRows }, { data: prof }] = await Promise.all([
+  const [{ data: roleRows }, { data: prof }, { data: membership }] = await Promise.all([
     admin.from('user_roles').select('role').eq('user_id', userId),
     admin.from('profiles').select('department_id').eq('user_id', userId).maybeSingle(),
+    admin.from('hierarchy_memberships').select('institution_id').eq('user_id', userId).maybeSingle(),
   ]);
+  let institutionId: string | null = membership?.institution_id ?? null;
+  if (prof?.department_id) {
+    const { data: department } = await admin.from('departments').select('faculty_id').eq('id', prof.department_id).maybeSingle();
+    if (department?.faculty_id) {
+      const { data: faculty } = await admin.from('faculties').select('institution_id').eq('id', department.faculty_id).maybeSingle();
+      institutionId = faculty?.institution_id ?? institutionId;
+    }
+  }
   return {
     isService: false,
     anonymous: false,
     userId,
     roles: (roleRows ?? []).map((r: any) => r.role as string),
     departmentId: (prof?.department_id as string | null) ?? null,
+    institutionId,
   };
 }
 

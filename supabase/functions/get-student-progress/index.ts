@@ -1,7 +1,8 @@
 // Reads the "Student Progress" and "Attendance" tabs and returns rows + a dashboard summary.
 // Access rules:
 //   - anonymous / student callers MUST supply an exact matric_no and only ever receive that student's rows
-//   - dept_admin / staff callers are forced to their own department (super_admin may query any)
+//   - staff callers are forced to their own department
+//   - public/super-admin lookups must name an institution with its own configured archive
 import { corsHeaders } from 'npm:@supabase/supabase-js@2/cors';
 import { getCaller, makeAdminClient, hasAnyRole, STAFF_ROLES, rateLimited, clientIp } from '../_shared/auth.ts';
 
@@ -46,9 +47,9 @@ async function readRange(token: string, sid: string, r: string): Promise<string[
   return (data.values ?? []) as string[][];
 }
 
-// tiny in-memory cache per isolate
+// Cache is keyed by institution so one tenant's sheet is never reused for another.
 const CACHE_TTL = 60_000;
-let cache: { at: number; progress: string[][]; attendance: string[][] } | null = null;
+const cache = new Map<string, { at: number; progress: string[][]; attendance: string[][] }>();
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
@@ -63,38 +64,114 @@ Deno.serve(async (req) => {
     const caller = await getCaller(req, adminDb);
     const isStaff = hasAnyRole(caller, STAFF_ROLES);
     const isSuper = caller.isService || caller.roles.includes('super_admin');
+    let verifiedStudentInstitutionId: string | null = null;
+    let allowedCourseCodes: string[] | null = null;
 
     if (!isStaff) {
-      // anonymous or student: exact-matric lookup only, never a directory dump
-      if (rateLimited(`prog:${caller.userId ?? clientIp(req)}`, 30)) return jsonRes({ ok: false, error: 'Too many requests' }, 429);
+      if (!caller.userId) return jsonRes({ ok: false, error: 'Sign in with your student account to view attendance.' }, 401);
+      if (rateLimited(`prog:${clientIp(req)}`, 30)) return jsonRes({ ok: false, error: 'Too many requests' }, 429);
       if (!matric || matric.length < 4) return jsonRes({ ok: false, error: 'matric_no required' }, 400);
+      const { data: student, error: studentError } = await adminDb
+        .from('students')
+        .select('matric_no, department_id')
+        .eq('auth_user_id', caller.userId)
+        .maybeSingle();
+      if (studentError) throw studentError;
+      if (!student || String(student.matric_no ?? '').trim().toLowerCase() !== matric) {
+        return jsonRes({ ok: false, error: 'You can only view attendance linked to your student account.' }, 403);
+      }
+      const { data: studentDepartment, error: studentDepartmentError } = await adminDb
+        .from('departments')
+        .select('faculty_id')
+        .eq('id', student.department_id)
+        .maybeSingle();
+      if (studentDepartmentError) throw studentDepartmentError;
+      const { data: studentFaculty, error: studentFacultyError } = studentDepartment?.faculty_id
+        ? await adminDb.from('faculties').select('institution_id').eq('id', studentDepartment.faculty_id).maybeSingle()
+        : { data: null, error: null };
+      if (studentFacultyError) throw studentFacultyError;
+      verifiedStudentInstitutionId = studentFaculty?.institution_id ?? null;
+      if (!verifiedStudentInstitutionId) return jsonRes({ ok: false, error: 'Your student account is not linked to an institution.' }, 403);
       department = '';
     } else if (!isSuper) {
       // staff are locked to their own department
       if (!caller.departmentId) return jsonRes({ ok: false, error: 'No department assigned' }, 403);
-      const { data: d } = await adminDb.from('departments').select('name').eq('id', caller.departmentId).maybeSingle();
+      const { data: d, error: departmentError } = await adminDb.from('departments').select('name').eq('id', caller.departmentId).maybeSingle();
+      if (departmentError) throw departmentError;
       if (!d?.name) return jsonRes({ ok: false, error: 'Department not found' }, 403);
       department = String(d.name).trim().toLowerCase();
+
+      if (!caller.roles.includes('dept_admin') && !caller.roles.includes('hod')) {
+        if (!courseCode) return jsonRes({ ok: false, error: 'Assigned staff must select an assigned course.' }, 403);
+        const staffRoles = caller.roles.filter((role) => role === 'lecturer' || role === 'course_rep');
+        const { data: assignments, error: assignmentError } = await adminDb
+          .from('course_staff')
+          .select('course_id')
+          .eq('user_id', caller.userId)
+          .eq('department_id', caller.departmentId)
+          .in('staff_role', staffRoles);
+        if (assignmentError) throw assignmentError;
+        const courseIds = (assignments ?? []).map((assignment) => assignment.course_id);
+        if (!courseIds.length) return jsonRes({ ok: false, error: 'No course assignments found.' }, 403);
+        const { data: assignedCourses, error: courseError } = await adminDb
+          .from('courses')
+          .select('code')
+          .in('id', courseIds)
+          .eq('department_id', caller.departmentId);
+        if (courseError) throw courseError;
+        allowedCourseCodes = (assignedCourses ?? []).map((course) => String(course.code ?? '').trim().toLowerCase()).filter(Boolean);
+        if (!allowedCourseCodes.includes(courseCode)) {
+          return jsonRes({ ok: false, error: 'You are not assigned to this course.' }, 403);
+        }
+      }
     }
+
+    let institutionId = caller.institutionId;
+    if (!isStaff && verifiedStudentInstitutionId) {
+      institutionId = verifiedStudentInstitutionId;
+      if (body.institution_id && body.institution_id !== institutionId) {
+        return jsonRes({ ok: false, error: 'You can only access your own institution’s archive' }, 403);
+      }
+    } else if (caller.anonymous || isSuper) {
+      institutionId = String(body.institution_id ?? url.searchParams.get('institution_id') ?? '').trim() || null;
+    } else if (body.institution_id && body.institution_id !== institutionId) {
+      return jsonRes({ ok: false, error: 'You cannot access another institution’s archive' }, 403);
+    }
+    if (!institutionId) return jsonRes({ ok: false, error: 'Select an institution for attendance lookup' }, 400);
+
+    const { data: institution, error: institutionError } = await adminDb
+      .from('institutions')
+      .select('id')
+      .eq('id', institutionId)
+      .eq('status', 'active')
+      .maybeSingle();
+    if (institutionError) throw institutionError;
+    if (!institution) return jsonRes({ ok: false, error: 'Institution is not active or does not exist' }, 404);
 
     const saJson = Deno.env.get('GOOGLE_SERVICE_ACCOUNT_JSON');
     if (!saJson) throw new Error('GOOGLE_SERVICE_ACCOUNT_JSON not configured');
     const sa = JSON.parse(saJson);
     const admin = adminDb;
-    const { data: settingRow } = await admin.from('app_settings').select('value').eq('key', 'google_sheet_id').maybeSingle();
-    const sid: string | undefined = (settingRow?.value as any)?.id ?? Deno.env.get('GOOGLE_SHEET_ID') ?? undefined;
-    if (!sid) throw new Error('GOOGLE_SHEET_ID not configured');
+    const { data: integration, error: integrationError } = await admin
+      .from('institution_integrations')
+      .select('google_sheet_id')
+      .eq('institution_id', institutionId)
+      .maybeSingle();
+    if (integrationError) throw integrationError;
+    const sid: string | undefined = integration?.google_sheet_id;
+    if (!sid) return jsonRes({ ok: false, error: 'This institution’s separate attendance archive has not been configured' }, 409);
 
     let progress: string[][], attendance: string[][];
-    if (cache && Date.now() - cache.at < CACHE_TTL) {
-      progress = cache.progress; attendance = cache.attendance;
+    const cached = cache.get(institutionId);
+    if (cached && Date.now() - cached.at < CACHE_TTL) {
+      progress = cached.progress; attendance = cached.attendance;
     } else {
       const token = await getAccessToken(sa);
       [progress, attendance] = await Promise.all([
         readRange(token, sid, `${q(PROGRESS_TAB)}!A2:J`),
         readRange(token, sid, `${q(ATTENDANCE_TAB)}!A2:J`),
       ]);
-      cache = { at: Date.now(), progress, attendance };
+      cache.set(institutionId, { at: Date.now(), progress, attendance });
     }
 
     // progress rows: [name, matric, dept, course, present, absent, total, pct, lastDate, lastStatus]
@@ -111,7 +188,14 @@ Deno.serve(async (req) => {
       last_status: r[9] ?? '',
     }));
     if (matric) rows = rows.filter(r => r.matric_no.toLowerCase() === matric);
-    if (courseCode) rows = rows.filter(r => r.course.toLowerCase().includes(courseCode));
+    if (courseCode) rows = rows.filter(r => {
+      const archivedCourse = r.course.toLowerCase();
+      return archivedCourse === courseCode || archivedCourse.startsWith(`${courseCode} -`);
+    });
+    if (allowedCourseCodes) rows = rows.filter(r => allowedCourseCodes!.some(code => {
+      const archivedCourse = r.course.toLowerCase();
+      return archivedCourse === code || archivedCourse.startsWith(`${code} -`);
+    }));
     if (department) rows = rows.filter(r => r.department.toLowerCase() === department);
 
     // summary
@@ -132,7 +216,7 @@ Deno.serve(async (req) => {
     for (const a of attendanceScoped) {
       if (!a[7]) continue;
       if (department && (a[4] ?? '').toLowerCase() !== department) continue;
-      if (courseCode && !(a[5] ?? '').toLowerCase().includes(courseCode)) continue;
+      if (courseCode && (a[5] ?? '').toLowerCase() !== courseCode) continue;
       classes.add(`${a[7]}|${a[5] ?? a[6] ?? ''}`);
     }
 
@@ -140,7 +224,7 @@ Deno.serve(async (req) => {
     const seq = new Map<string, { last: string; absents: number; max: number; date: string }>();
     const sorted = [...attendanceScoped]
       .filter(a => !department || (a[4] ?? '').toLowerCase() === department)
-      .filter(a => !courseCode || (a[5] ?? '').toLowerCase().includes(courseCode))
+      .filter(a => !courseCode || (a[5] ?? '').toLowerCase() === courseCode)
       .sort((x, y) => String(x[7] ?? '').localeCompare(String(y[7] ?? '')));
     for (const a of sorted) {
       const key = `${(a[2] ?? '').toLowerCase()}|${(a[5] ?? a[6] ?? '').toLowerCase()}`;
