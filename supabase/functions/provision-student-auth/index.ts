@@ -55,6 +55,9 @@ Deno.serve(async (req) => {
     const isAdmin = roles?.some((r: any) =>
       ['dept_admin', 'super_admin', 'lecturer', 'course_rep'].includes(r.role),
     );
+    const canResetCredentials = roles?.some((r: any) =>
+      ['dept_admin', 'super_admin'].includes(r.role),
+    );
     if (!isAdmin) return new Response(JSON.stringify({ error: 'Forbidden' }), { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
 
     const { data: callerProfile } = await admin.from('profiles').select('department_id').eq('user_id', user.id).maybeSingle();
@@ -66,6 +69,15 @@ Deno.serve(async (req) => {
 
     const body = await req.json().catch(() => ({}));
     const { student_id, action = 'provision' } = body as { student_id?: string; action?: string };
+    if (
+      ['reset_login', 'reset_password'].includes(action) &&
+      !canResetCredentials
+    ) {
+      return new Response(JSON.stringify({ error: 'Only department administrators can reset student credentials' }), {
+        status: 403,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
 
     // Build student query
     let query = admin.from('students').select('id, name, matric_no, department_id, auth_user_id');

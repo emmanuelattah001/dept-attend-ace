@@ -901,7 +901,10 @@ const DeptAdminDashboard = () => {
       header: key,
       key,
       width:
-        Math.max(key.length, ...data.map((row) => String(row[key] || "").length)) + 2,
+        Math.max(
+          key.length,
+          ...data.map((row) => String(row[key] || "").length),
+        ) + 2,
     }));
     data.forEach((row) => worksheet.addRow(row));
     worksheet.getRow(1).font = { bold: true };
@@ -1531,14 +1534,20 @@ const DeptAdminDashboard = () => {
   };
 
   // One-time passwords are shown ONCE (they are never stored in readable form).
-  type TempCredential = { name: string; matric_no: string; temp_password: string };
+  type TempCredential = {
+    name: string;
+    matric_no: string;
+    temp_password: string;
+  };
   const [credentials, setCredentials] = useState<TempCredential[] | null>(null);
   const downloadCredentials = () => {
     if (!credentials) return;
     const esc = (v: string) => `"${String(v).replace(/"/g, '""')}"`;
     const csv =
       "name,matric_no,temporary_password\n" +
-      credentials.map((c) => [c.name, c.matric_no, c.temp_password].map(esc).join(",")).join("\n");
+      credentials
+        .map((c) => [c.name, c.matric_no, c.temp_password].map(esc).join(","))
+        .join("\n");
     const url = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
     const a = document.createElement("a");
     a.href = url;
@@ -1633,44 +1642,17 @@ const DeptAdminDashboard = () => {
       const r = (data as any)?.results?.[0];
       if (r?.temp_password)
         setCredentials([
-          { name: r.name ?? studentName, matric_no: r.matric_no ?? "", temp_password: r.temp_password },
+          {
+            name: r.name ?? studentName,
+            matric_no: r.matric_no ?? "",
+            temp_password: r.temp_password,
+          },
         ]);
       toast.success(`Account reset for ${studentName}.`);
     } catch (e: any) {
       toast.error(e.message ?? "Failed to reset login");
     } finally {
       setResettingStudentId(null);
-    }
-  };
-
-  const [resettingDeviceId, setResettingDeviceId] = useState<string | null>(
-    null,
-  );
-  const resetSingleStudentDevice = async (
-    studentId: string,
-    studentName: string,
-  ) => {
-    if (
-      !confirm(
-        `Reset the device lock for ${studentName}? They can sign in again from a new phone, and their phone will be re-bound at the next scan.`,
-      )
-    )
-      return;
-    setResettingDeviceId(studentId);
-    try {
-      const { data, error } = await supabase.functions.invoke(
-        "provision-student-auth",
-        {
-          body: { action: "reset_device", student_id: studentId },
-        },
-      );
-      if (error || (data as any)?.error)
-        throw new Error((data as any)?.error || error?.message);
-      toast.success(`Device lock reset for ${studentName}.`);
-    } catch (e: any) {
-      toast.error(e.message ?? "Failed to reset device");
-    } finally {
-      setResettingDeviceId(null);
     }
   };
 
@@ -1681,41 +1663,34 @@ const DeptAdminDashboard = () => {
   return (
     <DashboardLayout>
       <div className="space-y-6">
-      <Dialog open={!!credentials} onOpenChange={(o) => !o && setCredentials(null)}>
-        <DialogContent className="max-w-lg">
-          <DialogHeader>
-            <DialogTitle>Temporary passwords</DialogTitle>
-          </DialogHeader>
-          <p className="text-sm text-muted-foreground">
-            Shown only once. Give each student their password privately (or download the CSV). They will be
-            asked to choose a new password on first login.
-          </p>
-          <div className="max-h-72 overflow-auto rounded-md border text-sm">
-            <table className="w-full">
-              <thead className="bg-muted/50 text-left">
-                <tr><th className="p-2">Name</th><th className="p-2">Matric</th><th className="p-2">Password</th></tr>
-              </thead>
-              <tbody>
-                {(credentials ?? []).map((c) => (
-                  <tr key={c.matric_no} className="border-t">
-                    <td className="p-2">{c.name}</td>
-                    <td className="p-2">{c.matric_no}</td>
-                    <td className="p-2 font-mono">{c.temp_password}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+        <div className="flex flex-wrap justify-between items-start gap-3">
+          <div className="min-w-0">
+            <h2 className="text-xl sm:text-2xl font-bold">
+              Department Admin Dashboard
+            </h2>
+            <p className="text-muted-foreground text-sm mt-1 truncate">
+              Department:{" "}
+              <span className="font-semibold text-foreground">
+                {departmentName}
+              </span>
+            </p>
           </div>
-          <div className="flex justify-end gap-2">
-            <Button variant="outline" onClick={downloadCredentials}>Download CSV</Button>
-            <Button onClick={() => setCredentials(null)}>Done</Button>
+          <div className="flex items-center gap-2">
+            {connectionStatus === "online" ? (
+              <Badge className="bg-green-100 text-green-800">
+                <Check className="w-3 h-3 mr-1" /> Online
+              </Badge>
+            ) : connectionStatus === "offline" ? (
+              <Badge className="bg-red-100 text-red-800">
+                <WifiOff className="w-3 h-3 mr-1" /> Offline
+              </Badge>
+            ) : (
+              <Badge variant="outline">
+                <Loader2 className="w-3 h-3 mr-1 animate-spin" /> Checking
+              </Badge>
+            )}
           </div>
-        </DialogContent>
-      </Dialog>
-        <DashboardHeader
-          departmentName={departmentName}
-          connectionStatus={connectionStatus}
-        />
+        </div>
 
         <ProgressSummary department={departmentName} />
 
@@ -1898,9 +1873,7 @@ const DeptAdminDashboard = () => {
                           {rotatingCode}
                         </span>
                       ) : (
-                        <span className="text-muted-foreground">
-                          loading…
-                        </span>
+                        <span className="text-muted-foreground">loading…</span>
                       )}
                     </p>
 
@@ -2479,24 +2452,6 @@ const DeptAdminDashboard = () => {
                                 <Button
                                   variant="ghost"
                                   size="icon"
-                                  title="Reset device lock (new phone)"
-                                  onClick={() =>
-                                    resetSingleStudentDevice(
-                                      student.id,
-                                      student.name,
-                                    )
-                                  }
-                                  disabled={resettingDeviceId === student.id}
-                                >
-                                  {resettingDeviceId === student.id ? (
-                                    <Loader2 className="w-4 h-4 animate-spin" />
-                                  ) : (
-                                    <Smartphone className="w-4 h-4" />
-                                  )}
-                                </Button>
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
                                   onClick={() =>
                                     deleteStudent(student.id, student.name)
                                   }
@@ -2837,9 +2792,7 @@ const DeptAdminDashboard = () => {
                       Blocked (already used)
                     </SelectItem>
                     <SelectItem value="reset">Admin resets</SelectItem>
-                    <SelectItem value="device_reset">
-                      Device resets
-                    </SelectItem>
+                    <SelectItem value="device_reset">Device resets</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
