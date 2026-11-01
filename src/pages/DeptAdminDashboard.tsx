@@ -129,7 +129,7 @@ const DeptAdminDashboard = () => {
   >([]);
   const [loginEventsLoading, setLoginEventsLoading] = useState(false);
   const [loginEventFilter, setLoginEventFilter] = useState<
-    "all" | "success" | "blocked_already_used" | "reset"
+    "all" | "success" | "blocked_already_used" | "reset" | "device_reset"
   >("all");
   const [loginEventSearch, setLoginEventSearch] = useState("");
   const [historySource, setHistorySource] = useState<"local" | "sheet">(
@@ -2773,6 +2773,9 @@ const DeptAdminDashboard = () => {
                       Blocked (already used)
                     </SelectItem>
                     <SelectItem value="reset">Admin resets</SelectItem>
+                    <SelectItem value="device_reset">
+                      Device resets
+                    </SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -2826,11 +2829,13 @@ const DeptAdminDashboard = () => {
                         success: "bg-green-100 text-green-700",
                         blocked_already_used: "bg-red-100 text-red-700",
                         reset: "bg-amber-100 text-amber-700",
+                        device_reset: "bg-blue-100 text-blue-700",
                       };
                       const labels: Record<string, string> = {
                         success: "Signed in",
                         blocked_already_used: "Blocked",
                         reset: "Admin reset",
+                        device_reset: "Device reset",
                       };
                       return rows.map((ev, idx) => {
                         const stu = students.find(
