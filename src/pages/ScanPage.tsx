@@ -2,9 +2,9 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { Html5Qrcode } from "html5-qrcode";
 import {
-  FaceDetector,
+  FaceLandmarker,
   FilesetResolver,
-  type Detection,
+  type NormalizedLandmark,
 } from "@mediapipe/tasks-vision";
 import { Geolocation } from "@capacitor/geolocation";
 import { supabase } from "@/integrations/supabase/client";
@@ -41,9 +41,12 @@ const FACE_WASM_URL =
   "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@1.0.1/wasm";
 
 const FACE_MODEL_URL =
-  "https://storage.googleapis.com/mediapipe-models/face_detector/blaze_face_short_range/float16/1/blaze_face_short_range.tflite";
+  "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task";
 
 const REQUIRED_STABLE_FRAMES = 8;
+const REQUIRED_CHALLENGE_FRAMES = 3;
+
+type ChallengeStep = "center" | "blink" | "turn" | "return";
 
 /**
  * The lecturer QR encodes a full URL: /scan?token=...&c=ABC123.
@@ -115,6 +118,7 @@ export default function ScanPage() {
   const submittedRef = useRef(false);
   const tokenRef = useRef("");
   const codeRef = useRef("");
+  const resumeScannerAfterScanRef = useRef(false);
   const urlTokenHandledRef = useRef<string | null>(null);
   const qrStartingRef = useRef(false);
   const faceStartingRef = useRef(false);
@@ -124,17 +128,25 @@ export default function ScanPage() {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
   const selfieStreamRef = useRef<MediaStream | null>(null);
-  const faceDetectorRef = useRef<FaceDetector | null>(null);
+  const faceLandmarkerRef = useRef<FaceLandmarker | null>(null);
 
   const animationFrameRef = useRef<number | null>(null);
   const stableFramesRef = useRef(0);
   const autoCaptureRef = useRef(false);
+  const challengeStepsRef = useRef<ChallengeStep[]>([]);
+  const challengeIndexRef = useRef(0);
+  const challengeFramesRef = useRef(0);
+  const eyesOpenedRef = useRef(false);
+  const neutralYawRef = useRef<number | null>(null);
 
   const [deviceId] = useState<string>(() => getDeviceId());
 
   const [token, setToken] = useState("");
   const [code, setCode] = useState("");
   const [loading, setLoading] = useState(false);
+  const [resumeScannerAfterAttempt, setResumeScannerAfterAttempt] =
+    useState(false);
+  const [qrScannerActive, setQrScannerActive] = useState(false);
 
   const [faceChecked, setFaceChecked] = useState(false);
   const [hasFaceEnrollment, setHasFaceEnrollment] = useState(false);
@@ -144,6 +156,7 @@ export default function ScanPage() {
 
   const [faceStatus, setFaceStatus] = useState<FaceStatus>("searching");
   const [faceMessage, setFaceMessage] = useState("Looking for your face...");
+  const [challengeStep, setChallengeStep] = useState<ChallengeStep>("center");
 
   const [stableProgress, setStableProgress] = useState(0);
 
@@ -215,44 +228,45 @@ export default function ScanPage() {
 
   /*
    * --------------------------------------------------------------------------
-   * Face Detector
+   * Face Landmarker
    * --------------------------------------------------------------------------
    */
 
-  const initializeFaceDetector = async () => {
-    if (faceDetectorRef.current) {
-      return faceDetectorRef.current;
+  const initializeFaceLandmarker = async () => {
+    if (faceLandmarkerRef.current) {
+      return faceLandmarkerRef.current;
     }
 
     const vision = await FilesetResolver.forVisionTasks(FACE_WASM_URL);
 
-    const createDetector = (delegate: "GPU" | "CPU") =>
-      FaceDetector.createFromOptions(vision, {
+    const createLandmarker = (delegate: "GPU" | "CPU") =>
+      FaceLandmarker.createFromOptions(vision, {
         baseOptions: {
           modelAssetPath: FACE_MODEL_URL,
           delegate,
         },
         runningMode: "VIDEO",
-        minDetectionConfidence: 0.65,
+        numFaces: 2,
+        minFaceDetectionConfidence: 0.65,
+        minFacePresenceConfidence: 0.65,
+        minTrackingConfidence: 0.65,
+        outputFaceBlendshapes: true,
       });
 
-    // GPU acceleration is not available in some Android WebViews. Falling back
-    // to CPU keeps detection functional instead of failing before the camera
-    // can start.
-    let detector: FaceDetector;
+    let landmarker: FaceLandmarker;
     try {
-      detector = await createDetector("GPU");
+      landmarker = await createLandmarker("GPU");
     } catch (gpuError) {
       console.warn(
-        "GPU face detector unavailable; falling back to CPU detection.",
+        "GPU face landmarker unavailable; falling back to CPU detection.",
         gpuError,
       );
-      detector = await createDetector("CPU");
+      landmarker = await createLandmarker("CPU");
     }
 
-    faceDetectorRef.current = detector;
+    faceLandmarkerRef.current = landmarker;
 
-    return detector;
+    return landmarker;
   };
 
   /*
@@ -441,13 +455,11 @@ export default function ScanPage() {
    */
 
   const evaluateFace = (
-    detection: Detection,
+    landmarks: NormalizedLandmark[],
     width: number,
     height: number,
   ) => {
-    const box = detection.boundingBox;
-
-    if (!box) {
+    if (landmarks.length === 0) {
       return {
         valid: false,
         status: "searching" as FaceStatus,
@@ -455,22 +467,18 @@ export default function ScanPage() {
       };
     }
 
-    const faceWidth = box.width;
-    const faceHeight = box.height;
+    const xs = landmarks.map(({ x }) => x);
+    const ys = landmarks.map(({ y }) => y);
+    const minX = Math.min(...xs);
+    const maxX = Math.max(...xs);
+    const minY = Math.min(...ys);
+    const maxY = Math.max(...ys);
+    const faceWidth = maxX - minX;
+    const faceHeight = maxY - minY;
+    const normalizedCenterX = (minX + maxX) / 2;
+    const normalizedCenterY = (minY + maxY) / 2;
+    const faceArea = faceWidth * faceHeight;
 
-    const centerX = box.originX + faceWidth / 2;
-    const centerY = box.originY + faceHeight / 2;
-
-    const normalizedCenterX = centerX / width;
-    const normalizedCenterY = centerY / height;
-
-    const faceArea = (faceWidth * faceHeight) / (width * height);
-
-    /*
-     * The detector's bounding box is smaller than the visible face guide.
-     * A 12% minimum forced users on common phone cameras to move too close,
-     * which made the preview appear to flicker between detection states.
-     */
     if (faceArea < 0.06) {
       return {
         valid: false,
@@ -510,6 +518,37 @@ export default function ScanPage() {
     };
   };
 
+  const getFaceYaw = (landmarks: NormalizedLandmark[]) => {
+    const leftEye = landmarks[33];
+    const rightEye = landmarks[263];
+    const nose = landmarks[1];
+
+    if (!leftEye || !rightEye || !nose) {
+      return null;
+    }
+
+    const eyeWidth = Math.abs(rightEye.x - leftEye.x);
+
+    if (eyeWidth < 0.001) {
+      return null;
+    }
+
+    return (nose.x - (leftEye.x + rightEye.x) / 2) / eyeWidth;
+  };
+
+  const advanceChallenge = () => {
+    challengeIndexRef.current += 1;
+    challengeFramesRef.current = 0;
+    stableFramesRef.current = 0;
+    eyesOpenedRef.current = false;
+    setStableProgress(0);
+
+    const nextStep = challengeStepsRef.current[challengeIndexRef.current];
+    if (nextStep) {
+      setChallengeStep(nextStep);
+    }
+  };
+
   /*
    * --------------------------------------------------------------------------
    * Live Face Detection Loop
@@ -518,9 +557,14 @@ export default function ScanPage() {
 
   const runFaceDetection = () => {
     const video = videoRef.current;
-    const detector = faceDetectorRef.current;
+    const landmarker = faceLandmarkerRef.current;
 
-    if (!video || !detector || !selfieStreamRef.current || autoCaptureRef.current) {
+    if (
+      !video ||
+      !landmarker ||
+      !selfieStreamRef.current ||
+      autoCaptureRef.current
+    ) {
       return;
     }
 
@@ -530,52 +574,138 @@ export default function ScanPage() {
     }
 
     try {
-      const result = detector.detectForVideo(video, performance.now());
-
-      const detections = result.detections ?? [];
+      const result = landmarker.detectForVideo(video, performance.now());
+      const faces = result.faceLandmarks ?? [];
 
       /*
        * Exactly one face is required.
        */
-      if (detections.length === 0) {
+      if (faces.length === 0) {
         stableFramesRef.current = 0;
+        challengeFramesRef.current = 0;
         setStableProgress(0);
         setFaceStatus("searching");
         setFaceMessage("Looking for your face...");
-      } else if (detections.length > 1) {
+      } else if (faces.length > 1) {
         stableFramesRef.current = 0;
+        challengeFramesRef.current = 0;
         setStableProgress(0);
         setFaceStatus("error");
         setFaceMessage("Only one face should be visible");
       } else {
-        const quality = evaluateFace(
-          detections[0],
-          video.videoWidth,
-          video.videoHeight,
-        );
+        const landmarks = faces[0];
+        const quality = evaluateFace(landmarks, video.videoWidth, video.videoHeight);
+        const yaw = getFaceYaw(landmarks);
 
-        setFaceStatus(quality.status);
-        setFaceMessage(quality.message);
-
-        if (quality.valid) {
-          stableFramesRef.current += 1;
-
-          const progress = Math.min(
-            100,
-            Math.round(
-              (stableFramesRef.current / REQUIRED_STABLE_FRAMES) * 100,
-            ),
-          );
-
-          setStableProgress(progress);
-
-          if (stableFramesRef.current >= REQUIRED_STABLE_FRAMES) {
-            void autoCaptureFace();
-            return;
-          }
-        } else {
+        if (!quality.valid || yaw === null) {
           stableFramesRef.current = 0;
+          challengeFramesRef.current = 0;
           setStableProgress(0);
+          setFaceStatus(quality.status);
+          setFaceMessage(quality.message);
+        } else {
+          const currentStep = challengeStepsRef.current[challengeIndexRef.current];
+          const blendshapes = result.faceBlendshapes?.[0]?.categories ?? [];
+          const leftBlink =
+            blendshapes.find(({ categoryName }) => categoryName === "eyeBlinkLeft")
+              ?.score ?? 0;
+          const rightBlink =
+            blendshapes.find(({ categoryName }) => categoryName === "eyeBlinkRight")
+              ?.score ?? 0;
+
+          setFaceStatus("hold");
+
+          if (currentStep === "center") {
+            stableFramesRef.current += 1;
+            setFaceMessage("Look straight at the camera...");
+            setStableProgress(
+              Math.round(
+                ((challengeIndexRef.current +
+                  stableFramesRef.current / REQUIRED_STABLE_FRAMES) /
+                  challengeStepsRef.current.length) *
+                  100,
+              ),
+            );
+
+            if (stableFramesRef.current >= REQUIRED_STABLE_FRAMES) {
+              neutralYawRef.current = yaw;
+              advanceChallenge();
+            }
+          } else if (currentStep === "blink") {
+            setFaceMessage(
+              eyesOpenedRef.current
+                ? "Blink once to continue"
+                : "Keep your eyes open, then blink",
+            );
+
+            if (leftBlink < 0.25 && rightBlink < 0.25) {
+              eyesOpenedRef.current = true;
+            }
+
+            if (
+              eyesOpenedRef.current &&
+              leftBlink > 0.6 &&
+              rightBlink > 0.6
+            ) {
+              challengeFramesRef.current += 1;
+            } else {
+              challengeFramesRef.current = 0;
+            }
+
+            setStableProgress(
+              Math.round(
+                ((challengeIndexRef.current +
+                  Math.min(
+                    challengeFramesRef.current / REQUIRED_CHALLENGE_FRAMES,
+                    0.95,
+                  )) /
+                  challengeStepsRef.current.length) *
+                  100,
+              ),
+            );
+
+            if (challengeFramesRef.current >= REQUIRED_CHALLENGE_FRAMES) {
+              advanceChallenge();
+            }
+          } else if (currentStep === "turn") {
+            const yawDelta = Math.abs(yaw - (neutralYawRef.current ?? yaw));
+            setFaceMessage("Turn your head slightly to either side");
+            challengeFramesRef.current =
+              yawDelta > 0.1 ? challengeFramesRef.current + 1 : 0;
+            setStableProgress(
+              Math.round(
+                ((challengeIndexRef.current +
+                  Math.min(
+                    challengeFramesRef.current / REQUIRED_CHALLENGE_FRAMES,
+                    0.95,
+                  )) /
+                  challengeStepsRef.current.length) *
+                  100,
+              ),
+            );
+
+            if (challengeFramesRef.current >= REQUIRED_CHALLENGE_FRAMES) {
+              advanceChallenge();
+            }
+          } else if (currentStep === "return") {
+            const yawDelta = Math.abs(yaw - (neutralYawRef.current ?? yaw));
+            setFaceMessage("Face forward and hold still");
+            stableFramesRef.current =
+              yawDelta < 0.045 ? stableFramesRef.current + 1 : 0;
+            setStableProgress(
+              Math.round(
+                ((challengeIndexRef.current +
+                  Math.min(stableFramesRef.current / REQUIRED_STABLE_FRAMES, 1)) /
+                  challengeStepsRef.current.length) *
+                  100,
+              ),
+            );
+
+            if (stableFramesRef.current >= REQUIRED_STABLE_FRAMES) {
+              void autoCaptureFace();
+              return;
+            }
+          }
         }
       }
     } catch (error) {
@@ -618,7 +748,17 @@ export default function ScanPage() {
       setFaceMessage("Preparing face verification...");
       setSelfie(null);
 
-      const detector = await initializeFaceDetector();
+      const landmarker = await initializeFaceLandmarker();
+
+      const firstAction: ChallengeStep = Math.random() < 0.5 ? "blink" : "turn";
+      const secondAction: ChallengeStep = firstAction === "blink" ? "turn" : "blink";
+      challengeStepsRef.current = ["center", firstAction, secondAction, "return"];
+      challengeIndexRef.current = 0;
+      challengeFramesRef.current = 0;
+      stableFramesRef.current = 0;
+      eyesOpenedRef.current = false;
+      neutralYawRef.current = null;
+      setChallengeStep("center");
 
       const stream = await navigator.mediaDevices.getUserMedia({
         video: {
@@ -677,9 +817,9 @@ export default function ScanPage() {
           if ((e as Error)?.name !== "AbortError") throw e;
         }
 
-        if (detector) {
+        if (landmarker) {
           setFaceStatus("searching");
-          setFaceMessage("Looking for your face...");
+          setFaceMessage("Center your face to begin");
 
           animationFrameRef.current = requestAnimationFrame(runFaceDetection);
         }
@@ -729,6 +869,7 @@ export default function ScanPage() {
 
     submittedRef.current = false;
     autoCaptureRef.current = false;
+    resumeScannerIfNeeded();
   };
 
   /*
@@ -736,6 +877,13 @@ export default function ScanPage() {
    * Submit Attendance Token
    * --------------------------------------------------------------------------
    */
+
+  const resumeScannerIfNeeded = () => {
+    if (resumeScannerAfterScanRef.current) {
+      resumeScannerAfterScanRef.current = false;
+      setResumeScannerAfterAttempt(true);
+    }
+  };
 
   const submitToken = async (value?: string, capturedSelfie?: string) => {
     const attendanceToken = (value ?? tokenRef.current).trim();
@@ -774,6 +922,10 @@ export default function ScanPage() {
             "Unable to start the selfie camera. Check camera permissions and try again.",
           variant: "destructive",
         });
+      }
+
+      if (!selfieStreamRef.current) {
+        resumeScannerIfNeeded();
       }
 
       return;
@@ -867,6 +1019,7 @@ export default function ScanPage() {
        */
       setFaceStatus("searching");
       setFaceMessage("Ready for the next attendance scan.");
+      resumeScannerIfNeeded();
     } catch (error) {
       console.error("Attendance submission failed:", error);
 
@@ -887,6 +1040,7 @@ export default function ScanPage() {
       setSelfie(null);
       submittedRef.current = false;
       autoCaptureRef.current = false;
+      resumeScannerIfNeeded();
     } finally {
       setLoading(false);
     }
@@ -911,6 +1065,7 @@ export default function ScanPage() {
       tokenRef.current = scannedToken;
       setCode(scannedCode);
       codeRef.current = scannedCode;
+      resumeScannerAfterScanRef.current = true;
 
       await stopScanner();
 
@@ -923,6 +1078,7 @@ export default function ScanPage() {
       console.error("QR scan handling failed:", error);
       submittedRef.current = false;
       setLoading(false);
+      resumeScannerIfNeeded();
       toast({
         title: "Scan failed",
         description:
@@ -955,6 +1111,7 @@ export default function ScanPage() {
       const scanner = new Html5Qrcode("qr-reader");
 
       scannerRef.current = scanner;
+      setQrScannerActive(true);
 
       await scanner.start(
         {
@@ -996,6 +1153,7 @@ export default function ScanPage() {
 
   const stopScanner = async () => {
     if (!scannerRef.current) {
+      setQrScannerActive(false);
       return;
     }
 
@@ -1014,7 +1172,32 @@ export default function ScanPage() {
     }
 
     scannerRef.current = null;
+    setQrScannerActive(false);
   };
+
+  const startScannerRef = useRef(startScanner);
+  startScannerRef.current = startScanner;
+
+  useEffect(() => {
+    if (
+      !resumeScannerAfterAttempt ||
+      loading ||
+      cameraActive ||
+      selfie ||
+      locationError
+    ) {
+      return;
+    }
+
+    setResumeScannerAfterAttempt(false);
+    void startScannerRef.current();
+  }, [
+    resumeScannerAfterAttempt,
+    loading,
+    cameraActive,
+    selfie,
+    locationError,
+  ]);
 
   /*
    * --------------------------------------------------------------------------
@@ -1069,9 +1252,9 @@ export default function ScanPage() {
 
       selfieStreamRef.current = null;
 
-      if (faceDetectorRef.current) {
-        faceDetectorRef.current.close();
-        faceDetectorRef.current = null;
+      if (faceLandmarkerRef.current) {
+        faceLandmarkerRef.current.close();
+        faceLandmarkerRef.current = null;
       }
     };
   }, []);
@@ -1156,6 +1339,14 @@ export default function ScanPage() {
       faceStatus === "detected" ||
       faceStatus === "hold" ||
       faceStatus === "captured";
+    const challengeLabels: Record<ChallengeStep, string> = {
+      center: "Center",
+      blink: "Blink",
+      turn: "Turn",
+      return: "Face forward",
+    };
+    const activeChallengeIndex =
+      challengeStepsRef.current.indexOf(challengeStep);
 
     return (
       <div className="container mx-auto max-w-2xl px-4 py-8">
@@ -1170,10 +1361,35 @@ export default function ScanPage() {
           <CardContent className="space-y-5">
             <div className="text-center">
               <p className="text-sm text-muted-foreground">
-                Position your face inside the guide. Capture happens
-                automatically.
+                Follow the on-screen prompts. Your photo is captured
+                automatically when the checks are complete.
               </p>
             </div>
+
+            {cameraActive && (
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                {challengeStepsRef.current.map((step, index) => {
+                  const isComplete = index < activeChallengeIndex;
+                  const isActive = index === activeChallengeIndex;
+
+                  return (
+                    <div
+                      key={`${step}-${index}`}
+                      className={`rounded-lg border px-3 py-2 text-center text-xs font-medium ${
+                        isActive
+                          ? "border-primary bg-primary/10 text-primary"
+                          : isComplete
+                            ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-700"
+                            : "text-muted-foreground"
+                      }`}
+                    >
+                      {isComplete ? "Done · " : ""}
+                      {challengeLabels[step]}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
 
             {cameraActive && (
               <div className="relative overflow-hidden rounded-2xl border bg-black">
@@ -1256,9 +1472,14 @@ export default function ScanPage() {
 
                   <div className="flex items-center gap-2 text-sm">
                     <Camera className="h-4 w-4" />
-                    <span>Live camera</span>
+                    <span>Blink and head-turn prompts</span>
                   </div>
                 </div>
+                <p className="mt-3 text-xs text-muted-foreground">
+                  These on-device checks add a basic replay deterrent; they do
+                  not guarantee liveness or replace a dedicated liveness
+                  service.
+                </p>
               </div>
             )}
 
@@ -1318,7 +1539,8 @@ export default function ScanPage() {
         <h1 className="text-2xl font-bold">Scan Attendance QR</h1>
 
         <p className="mt-2 text-sm text-muted-foreground">
-          Scan the QR code displayed by your lecturer to record your attendance.
+          Scan the QR code displayed by your lecturer. A valid scan moves
+          straight to face verification automatically.
         </p>
       </div>
 
@@ -1339,10 +1561,10 @@ export default function ScanPage() {
           <Button
             className="w-full"
             onClick={() => void startScanner()}
-            disabled={loading}
+            disabled={loading || qrScannerActive}
           >
             <ScanLine className="mr-2 h-4 w-4" />
-            Start QR Scanner
+            {qrScannerActive ? "Scanning for QR code..." : "Start QR Scanner"}
           </Button>
 
           <div className="relative">
@@ -1409,7 +1631,7 @@ export default function ScanPage() {
               ) : (
                 <>
                   <Check className="mr-2 h-4 w-4" />
-                  Continue
+                  Verify manually
                 </>
               )}
             </Button>
@@ -1491,6 +1713,7 @@ export default function ScanPage() {
                 autoCaptureRef.current = false;
                 setFaceStatus("searching");
                 setFaceMessage("Ready for the next attendance scan.");
+                resumeScannerIfNeeded();
               }}
             >
               Back to scan
