@@ -18,7 +18,7 @@ interface AttendanceRow {
 
 interface LinkedStudent {
   id: string;
-  matric_no: string;
+  matric_no: string | null;
   department_id: string;
 }
 
@@ -50,7 +50,12 @@ async function getLinkedStudent(userId: string): Promise<{ student: LinkedStuden
     .eq('id', department.faculty_id)
     .maybeSingle();
   if (facultyError) throw facultyError;
-  if (!faculty) throw new Error('Your faculty is not linked to an institution.');
+  if (!faculty) {
+    return {
+      student: { id: student.id, matric_no: student.matric_no, department_id: student.department_id },
+      institutionId: null,
+    };
+  }
 
   return {
     student: { id: student.id, matric_no: student.matric_no, department_id: student.department_id },
@@ -120,7 +125,7 @@ const CheckAttendance = () => {
 
     try {
       const { student, institutionId: linkedInstitutionId } = await getLinkedStudent(user.id);
-      if (student.matric_no.trim().toLowerCase() !== trimmed.toLowerCase()) {
+      if (!student.matric_no || student.matric_no.trim().toLowerCase() !== trimmed.toLowerCase()) {
         throw new Error('Enter the matric number linked to your student account.');
       }
       if (linkedInstitutionId && linkedInstitutionId !== institutionId) {
