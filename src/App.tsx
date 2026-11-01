@@ -5,14 +5,15 @@ import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { AuthProvider } from "@/hooks/useAuth";
 import ErrorBoundary from "@/components/ErrorBoundary";
-import { useEffect } from "react";
+import { Suspense, lazy, useEffect } from "react";
 import { toast } from "sonner";
 import Index from "./pages/Index.tsx";
 import AuthPage from "./pages/AuthPage.tsx";
 import NotFound from "./pages/NotFound.tsx";
 import InstallPage from "./pages/InstallPage.tsx";
 import CheckAttendance from "./pages/CheckAttendance.tsx";
-import ScanPage from "./pages/ScanPage.tsx";
+import LoadingScreen from "@/components/LoadingScreen";
+const ScanPage = lazy(() => import("./pages/ScanPage.tsx"));
 
 const queryClient = new QueryClient();
 
@@ -52,7 +53,7 @@ const App = () => (
               <Route path="/login" element={<AuthPage />} />
               <Route path="/install" element={<InstallPage />} />
               <Route path="/check-attendance" element={<CheckAttendance />} />
-              <Route path="/scan" element={<ScanPage />} />
+              <Route path="/scan" element={<Suspense fallback={<LoadingScreen />}><ScanPage /></Suspense>} />
               <Route path="*" element={<NotFound />} />
             </Routes>
           </BrowserRouter>

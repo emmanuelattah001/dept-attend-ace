@@ -1,22 +1,40 @@
-// Deletes synced attendance rows older than 24h. Google Sheets is untouched.
-import { createClient } from 'npm:@supabase/supabase-js@2';
+// Deletes attendance rows that are already synced to Google Sheets and older than RETENTION_HOURS
+// (default 24). Google Sheets is untouched.
+//
+// SECURITY: only callable with the service-role key or the CRON_SECRET header. See docs/DEPLOYMENT.md
+// for the pg_cron snippet that schedules it.
 import { corsHeaders } from 'npm:@supabase/supabase-js@2/cors';
+import { getCaller, makeAdminClient } from '../_shared/auth.ts';
+
+const json = (b: unknown, status = 200) =>
+  new Response(JSON.stringify(b), { status, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
   try {
-    const admin = createClient(
-      Deno.env.get('SUPABASE_URL')!,
-      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
-    );
-    const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    const admin = makeAdminClient();
 
-    // Best-effort: push anything unsynced first so we don't lose data
-    try {
-      await admin.functions.invoke('sheets-sync', { body: { action: 'sync_unsynced' } });
-    } catch (e) {
-      console.log('pre-cleanup sync failed (continuing):', (e as Error).message);
-    }
+    const cronSecret = Deno.env.get('CRON_SECRET');
+    const provided = req.headers.get('x-cron-secret') ?? '';
+    const secretOk = !!cronSecret && provided.length === cronSecret.length && provided === cronSecret;
+    const caller = await getCaller(req, admin);
+    if (!secretOk && !caller.isService) return json({ ok: false, error: 'Forbidden' }, 403);
+
+    const hours = Math.max(1, Number(Deno.env.get('RETENTION_HOURS') ?? 24) || 24);
+    const cutoff = new Date(Date.now() - hours * 60 * 60 * 1000).toISOString();
+
+    // Push anything unsynced first. If this fails we ABORT: deleting only synced rows is safe,
+    // but we don't want to run silently while sync is broken.
+    const syncUrl = `${Deno.env.get('SUPABASE_URL')}/functions/v1/sheets-sync`;
+    const syncResp = await fetch(syncUrl, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ action: 'sync_unsynced' }),
+    }).catch((e) => ({ ok: false, status: 0, text: async () => String(e) }) as any);
+    if (!syncResp.ok) console.log('pre-cleanup sync failed (continuing, only synced rows are deleted):', syncResp.status);
 
     const { data, error } = await admin
       .from('attendance')
@@ -27,14 +45,9 @@ Deno.serve(async (req) => {
     if (error) throw error;
 
     console.log(`cleanup-attendance: deleted ${data?.length ?? 0} rows older than ${cutoff}`);
-    return new Response(JSON.stringify({ ok: true, deleted: data?.length ?? 0, cutoff }), {
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-    });
+    return json({ ok: true, deleted: data?.length ?? 0, cutoff });
   } catch (e: any) {
     console.error('cleanup-attendance error:', e);
-    return new Response(JSON.stringify({ ok: false, error: e?.message || String(e) }), {
-      status: 500,
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-    });
+    return json({ ok: false, error: 'Cleanup failed' }, 500);
   }
 });

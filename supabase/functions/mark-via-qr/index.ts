@@ -8,8 +8,15 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
-const json = (body: unknown, status = 200) =>
-  new Response(JSON.stringify(body), { status, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+// Expected rejections (4xx) are returned as 200 + { success: false, message } so the
+// client shows a friendly message instead of treating them as a crash.
+const json = (body: any, status = 200) => {
+  if (status >= 400 && status < 500) {
+    body = { ...body, success: false, message: body?.message ?? body?.error, status_code: status };
+    status = 200;
+  }
+  return new Response(JSON.stringify(body), { status, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+};
 
 // Weighted confidence model (total 100)
 const W = { qr: 30, face: 30, location: 25, device: 15 };
@@ -40,22 +47,24 @@ Deno.serve(async (req) => {
   let departmentId: string | null = null;
   let courseId: string | null = null;
 
-  const fail = async (reason: string, message: string, status: number, extra: Record<string, unknown> = {}) => {
+  // Always respond 200 with success:false so the client never sees a
+  // non-2xx (which the preview surfaces as a blank-screen runtime error).
+  const fail = async (reason: string, message: string, _status: number, extra: Record<string, unknown> = {}) => {
     try {
       await admin.from('verification_events').insert({
         session_id: sessionId, student_id: studentId, department_id: departmentId, course_id: courseId,
         outcome: 'failed', reason, confidence_score: score, proofs,
       });
     } catch (e) { console.error('verification_events insert failed', e); }
-    return json({ error: message, reason, confidence_score: score, proofs, ...extra }, status);
+    return json({ success: false, message, reason, confidence_score: score, proofs, ...extra });
   };
 
   try {
     const authHeader = req.headers.get('Authorization') ?? '';
-    if (!authHeader) return json({ error: 'Not authenticated' }, 401);
+    if (!authHeader) return json({ success: false, message: 'Not authenticated. Please sign in again.' });
     const userClient = createClient(url, anon, { global: { headers: { Authorization: authHeader } } });
     const { data: { user }, error: userErr } = await userClient.auth.getUser();
-    if (userErr || !user) return json({ error: 'Auth invalid' }, 401);
+    if (userErr || !user) return json({ success: false, message: 'Your session has expired. Please sign in again.' });
 
     const body = await req.json().catch(() => ({}));
     const token = String(body?.token ?? '').trim();
@@ -65,23 +74,23 @@ Deno.serve(async (req) => {
     const accuracy = typeof body?.accuracy === 'number' ? body.accuracy : null;
     const selfie = typeof body?.selfie === 'string' ? body.selfie : '';
     const deviceId = String(body?.device_id ?? '').trim();
-    if (!token) return json({ error: 'Missing token' }, 400);
+    if (!token) return json({ success: false, message: 'Missing token. Rescan the live screen.' });
 
     const { data: session } = await admin
       .from('attendance_sessions')
       .select('id, course_id, department_id, date, expires_at, created_by, latitude, longitude, radius_m, secret, rotating, rotate_seconds')
       .eq('token', token)
       .maybeSingle();
-    if (!session) return json({ error: 'Invalid QR code' }, 404);
+    if (!session) return json({ success: false, message: 'Invalid QR code. Rescan the live screen.' });
     sessionId = session.id; departmentId = session.department_id; courseId = session.course_id;
-    if (new Date(session.expires_at) < new Date()) return json({ error: 'This session has ended' }, 410);
+    if (new Date(session.expires_at) < new Date()) return json({ success: false, message: 'This session has ended. Ask for a new QR code.' });
 
     const { data: student } = await admin
       .from('students')
       .select('id, name, department_id, matric_no, face_url, device_fingerprint')
       .eq('auth_user_id', user.id)
       .maybeSingle();
-    if (!student) return json({ error: 'No student profile linked to this account' }, 403);
+    if (!student) return json({ success: false, message: 'No student profile is linked to this account.' });
     studentId = student.id;
     if (student.department_id !== session.department_id) return await fail('wrong_department', 'This session is for a different department', 403);
 
@@ -137,17 +146,18 @@ Deno.serve(async (req) => {
     }
 
     // ---- Proof 4: Device ----
-    if (deviceId) {
+    if (!deviceId || deviceId.length < 8) {
+      return await fail('device_missing', 'Device could not be identified. Reload the page and try again.', 400);
+    }
+    {
       const known = student.device_fingerprint;
       const matchDevice = !known || known === deviceId;
       proofs.device = { provided: true, known: Boolean(known), match: matchDevice };
       if (!known) await admin.from('students').update({ device_fingerprint: deviceId }).eq('id', student.id);
       if (matchDevice) score += W.device;
-      else if (score + 0 < PASS_THRESHOLD) {
-        return await fail('device_mismatch', 'This account is bound to a different device.', 403);
+      else {
+        return await fail('device_mismatch', 'This account is bound to a different device. Ask your admin to reset your device.', 403);
       }
-    } else {
-      proofs.device = { provided: false };
     }
 
     score = Math.max(0, Math.min(100, score));
@@ -189,6 +199,6 @@ Deno.serve(async (req) => {
     });
   } catch (e) {
     console.error('mark-via-qr error', e);
-    return json({ error: String((e as Error).message ?? e) }, 500);
+    return json({ success: false, message: String((e as Error).message ?? e) });
   }
 });

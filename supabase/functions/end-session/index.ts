@@ -29,7 +29,7 @@ Deno.serve(async (req) => {
 
     // Confirm admin role
     const { data: roles } = await admin.from('user_roles').select('role').eq('user_id', user.id);
-    const isAdmin = (roles ?? []).some((r: any) => r.role === 'dept_admin' || r.role === 'super_admin');
+    const isAdmin = (roles ?? []).some((r: any) => ['dept_admin','super_admin','lecturer','course_rep','hod'].includes(r.role));
     if (!isAdmin) return new Response(JSON.stringify({ error: 'Not authorized' }), { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
 
     // Load session

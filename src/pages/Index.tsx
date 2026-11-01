@@ -1,12 +1,14 @@
+import { Suspense, lazy } from 'react';
 import { useAuth } from '@/hooks/useAuth';
 import { useNavigate } from 'react-router-dom';
-import SuperAdminDashboard from './SuperAdminDashboard';
-import DeptAdminDashboard from './DeptAdminDashboard';
-import StudentDashboard from './StudentDashboard';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { ClipboardCheck, Download, Search, LogIn, Users, ShieldCheck, BarChart3, FileText, Smartphone, Zap } from 'lucide-react';
 import LoadingScreen from '@/components/LoadingScreen';
+
+const SuperAdminDashboard = lazy(() => import('./SuperAdminDashboard'));
+const DeptAdminDashboard = lazy(() => import('./DeptAdminDashboard'));
+const StudentDashboard = lazy(() => import('./StudentDashboard'));
 
 const features = [
   {
@@ -61,7 +63,7 @@ const LandingPage = () => {
               <span className="text-primary">Made Simple</span>
             </h1>
             <p className="text-lg text-muted-foreground max-w-lg mx-auto">
-              AttendTrack helps institutions track, manage, and share student attendance effortlessly — from marking to PDF reports, all in one place.
+              Smart Attendance helps institutions track, manage, and share student attendance effortlessly — from marking to PDF reports, all in one place.
             </p>
 
             <div className="flex flex-col sm:flex-row gap-3 justify-center pt-2">
@@ -109,7 +111,7 @@ const LandingPage = () => {
           </div>
           <div className="grid sm:grid-cols-3 gap-8 max-w-3xl mx-auto">
             {[
-              { step: '1', icon: Smartphone, title: 'Open the App', desc: 'Access AttendTrack from any device — mobile, tablet, or desktop.' },
+              { step: '1', icon: Smartphone, title: 'Open the App', desc: 'Access Smart Attendance from any device — mobile, tablet, or desktop.' },
               { step: '2', icon: ClipboardCheck, title: 'Mark Attendance', desc: 'Admins select a date, pick students, and mark present or absent.' },
               { step: '3', icon: Zap, title: 'View & Share', desc: 'Students check records instantly. Admins export branded PDF reports.' },
             ].map((s) => (
@@ -144,7 +146,7 @@ const LandingPage = () => {
       {/* Footer */}
       <footer className="border-t py-6">
         <div className="container mx-auto px-4 text-center text-sm text-muted-foreground">
-          © {new Date().getFullYear()} AttendTrack. Built for smarter attendance management.
+          © {new Date().getFullYear()} Smart Attendance. Built for smarter attendance management.
         </div>
       </footer>
     </div>
@@ -160,18 +162,22 @@ const Index = () => {
 
   if (!session) return <LandingPage />;
 
-  switch (role) {
-    case 'super_admin':
-      return <SuperAdminDashboard />;
-    case 'dept_admin':
-    case 'hod':
-    case 'lecturer':
-    case 'course_rep':
-      return <DeptAdminDashboard />;
-    case 'student':
-    default:
-      return <StudentDashboard />;
-  }
+  const dashboard = (() => {
+    switch (role) {
+      case 'super_admin':
+        return <SuperAdminDashboard />;
+      case 'dept_admin':
+      case 'hod':
+      case 'lecturer':
+      case 'course_rep':
+        return <DeptAdminDashboard />;
+      case 'student':
+      default:
+        return <StudentDashboard />;
+    }
+  })();
+
+  return <Suspense fallback={<LoadingScreen />}>{dashboard}</Suspense>;
 };
 
 export default Index;

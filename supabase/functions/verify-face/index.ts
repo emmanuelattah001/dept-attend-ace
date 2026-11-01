@@ -55,7 +55,7 @@ Deno.serve(async (req) => {
       if (!q.ok) return json({ error: q.error }, q.status ?? 500);
       if (!q.acceptable) {
         const tips = q.issues.length ? q.issues.join(' ') : 'Make sure your face is clear, centered and well lit.';
-        return json({ error: `Photo not clear enough: ${tips}`, issues: q.issues, quality_rejected: true }, 422);
+        return json({ ok: false, message: `Photo not clear enough: ${tips}`, issues: q.issues, quality_rejected: true }, 200);
       }
       const path = `${user.id}/face.jpg`;
       const { error: upErr } = await admin.storage.from('faces').upload(path, bytes, { contentType, upsert: true });
@@ -74,7 +74,8 @@ Deno.serve(async (req) => {
       if (!enrolled) return json({ error: 'Enrolled photo could not be read' }, 500);
       const result = await compareFaces(enrolled, image);
       if (!result.ok) return json({ error: result.error }, result.status ?? 500);
-      return json({ ok: true, ...result });
+      const { ok: _ok, ...rest } = result;
+      return json({ ok: true, ...rest });
     }
 
     return json({ error: 'Unknown action' }, 400);

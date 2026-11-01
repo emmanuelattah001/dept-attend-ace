@@ -11,6 +11,14 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  AlertDialog,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
@@ -30,12 +38,43 @@ import {
 const DEVICE_KEY = "attendance_device_id";
 
 const FACE_WASM_URL =
-  "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision/wasm";
+  "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@1.0.1/wasm";
 
 const FACE_MODEL_URL =
   "https://storage.googleapis.com/mediapipe-models/face_detector/blaze_face_short_range/float16/1/blaze_face_short_range.tflite";
 
 const REQUIRED_STABLE_FRAMES = 8;
+
+/**
+ * The lecturer QR encodes a full URL: /scan?token=...&c=ABC123.
+ * Extract the session token and the rotating 6-digit code from it,
+ * falling back to treating the text as a raw token.
+ */
+function parseScanText(text: string): { token: string; code: string } {
+  const raw = (text ?? "").trim();
+  if (!raw) return { token: "", code: "" };
+  try {
+    const url = new URL(raw);
+    const t = url.searchParams.get("token");
+    if (t) {
+      return {
+        token: t.trim(),
+        code: (url.searchParams.get("c") ?? "").trim().toUpperCase(),
+      };
+    }
+  } catch {
+    // not a URL
+  }
+  const tokenMatch = raw.match(/[?&]token=([^&\s]+)/);
+  if (tokenMatch) {
+    const codeMatch = raw.match(/[?&]c=([^&\s]+)/);
+    return {
+      token: decodeURIComponent(tokenMatch[1]),
+      code: codeMatch ? decodeURIComponent(codeMatch[1]).toUpperCase() : "",
+    };
+  }
+  return { token: raw, code: "" };
+}
 
 function getDeviceId(): string {
   let id = localStorage.getItem(DEVICE_KEY);
@@ -74,6 +113,12 @@ export default function ScanPage() {
 
   const scannerRef = useRef<Html5Qrcode | null>(null);
   const submittedRef = useRef(false);
+  const tokenRef = useRef("");
+  const codeRef = useRef("");
+  const urlTokenHandledRef = useRef<string | null>(null);
+  const qrStartingRef = useRef(false);
+  const faceStartingRef = useRef(false);
+  const cameraRequestIdRef = useRef(0);
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -88,14 +133,13 @@ export default function ScanPage() {
   const [deviceId] = useState<string>(() => getDeviceId());
 
   const [token, setToken] = useState("");
+  const [code, setCode] = useState("");
   const [loading, setLoading] = useState(false);
 
   const [faceChecked, setFaceChecked] = useState(false);
   const [hasFaceEnrollment, setHasFaceEnrollment] = useState(false);
 
   const [selfie, setSelfie] = useState<string | null>(null);
-  const [selfieStream, setSelfieStream] = useState<MediaStream | null>(null);
-
   const [cameraActive, setCameraActive] = useState(false);
 
   const [faceStatus, setFaceStatus] = useState<FaceStatus>("searching");
@@ -104,6 +148,7 @@ export default function ScanPage() {
   const [stableProgress, setStableProgress] = useState(0);
 
   const [location, setLocation] = useState<LocationData | null>(null);
+  const [locationError, setLocationError] = useState<string | null>(null);
 
   /*
    * --------------------------------------------------------------------------
@@ -132,7 +177,7 @@ export default function ScanPage() {
         const { data, error } = await supabase
           .from("students")
           .select("face_url")
-          .eq("user_id", user.id)
+          .eq("auth_user_id", user.id)
           .maybeSingle();
 
         if (error) {
@@ -181,14 +226,29 @@ export default function ScanPage() {
 
     const vision = await FilesetResolver.forVisionTasks(FACE_WASM_URL);
 
-    const detector = await FaceDetector.createFromOptions(vision, {
-      baseOptions: {
-        modelAssetPath: FACE_MODEL_URL,
-        delegate: "GPU",
-      },
-      runningMode: "VIDEO",
-      minDetectionConfidence: 0.65,
-    });
+    const createDetector = (delegate: "GPU" | "CPU") =>
+      FaceDetector.createFromOptions(vision, {
+        baseOptions: {
+          modelAssetPath: FACE_MODEL_URL,
+          delegate,
+        },
+        runningMode: "VIDEO",
+        minDetectionConfidence: 0.65,
+      });
+
+    // GPU acceleration is not available in some Android WebViews. Falling back
+    // to CPU keeps detection functional instead of failing before the camera
+    // can start.
+    let detector: FaceDetector;
+    try {
+      detector = await createDetector("GPU");
+    } catch (gpuError) {
+      console.warn(
+        "GPU face detector unavailable; falling back to CPU detection.",
+        gpuError,
+      );
+      detector = await createDetector("CPU");
+    }
 
     faceDetectorRef.current = detector;
 
@@ -218,6 +278,9 @@ export default function ScanPage() {
    */
 
   const stopSelfieCamera = useCallback(() => {
+    // Invalidate any pending model/camera setup before stopping the stream.
+    cameraRequestIdRef.current += 1;
+    faceStartingRef.current = false;
     stopFaceDetection();
 
     const stream = selfieStreamRef.current;
@@ -232,7 +295,6 @@ export default function ScanPage() {
       videoRef.current.srcObject = null;
     }
 
-    setSelfieStream(null);
     setCameraActive(false);
   }, []);
 
@@ -254,12 +316,9 @@ export default function ScanPage() {
       }
 
       if (permission.location !== "granted") {
-        toast({
-          title: "Location permission required",
-          description:
-            "Location permission is required to verify classroom attendance.",
-          variant: "destructive",
-        });
+        setLocationError(
+          "Location permission is required to verify classroom attendance. Please allow location access and try again.",
+        );
 
         return null;
       }
@@ -282,12 +341,9 @@ export default function ScanPage() {
     } catch (error) {
       console.error("Location reading failed:", error);
 
-      toast({
-        title: "Location unavailable",
-        description:
-          "Failed to read your device location. Ensure location is switched ON and try again.",
-        variant: "destructive",
-      });
+      setLocationError(
+        "Failed to read your device location. Ensure location is switched ON and try again.",
+      );
 
       return null;
     }
@@ -331,7 +387,7 @@ export default function ScanPage() {
    */
 
   const autoCaptureFace = async () => {
-    if (autoCaptureRef.current || selfie || !cameraActive) {
+    if (autoCaptureRef.current || !selfieStreamRef.current) {
       return;
     }
 
@@ -358,7 +414,10 @@ export default function ScanPage() {
        */
       submittedRef.current = false;
 
-      await submitToken(token);
+      // React state updates are asynchronous. Pass the frame directly so the
+      // attendance request cannot see the previous `selfie` value and reopen
+      // the camera instead of submitting the captured image.
+      await submitToken(tokenRef.current, image);
     } catch (error) {
       console.error("Automatic face capture failed:", error);
 
@@ -408,9 +467,11 @@ export default function ScanPage() {
     const faceArea = (faceWidth * faceHeight) / (width * height);
 
     /*
-     * Face should occupy approximately 12% - 65% of the frame.
+     * The detector's bounding box is smaller than the visible face guide.
+     * A 12% minimum forced users on common phone cameras to move too close,
+     * which made the preview appear to flicker between detection states.
      */
-    if (faceArea < 0.12) {
+    if (faceArea < 0.06) {
       return {
         valid: false,
         status: "move-closer" as FaceStatus,
@@ -418,7 +479,7 @@ export default function ScanPage() {
       };
     }
 
-    if (faceArea > 0.65) {
+    if (faceArea > 0.55) {
       return {
         valid: false,
         status: "move-away" as FaceStatus,
@@ -430,10 +491,10 @@ export default function ScanPage() {
      * Keep face reasonably centered.
      */
     if (
-      normalizedCenterX < 0.32 ||
-      normalizedCenterX > 0.68 ||
-      normalizedCenterY < 0.28 ||
-      normalizedCenterY > 0.72
+      normalizedCenterX < 0.28 ||
+      normalizedCenterX > 0.72 ||
+      normalizedCenterY < 0.24 ||
+      normalizedCenterY > 0.76
     ) {
       return {
         valid: false,
@@ -459,7 +520,7 @@ export default function ScanPage() {
     const video = videoRef.current;
     const detector = faceDetectorRef.current;
 
-    if (!video || !detector || !cameraActive || selfie) {
+    if (!video || !detector || !selfieStreamRef.current || autoCaptureRef.current) {
       return;
     }
 
@@ -519,6 +580,11 @@ export default function ScanPage() {
       }
     } catch (error) {
       console.error("Live face detection error:", error);
+      stableFramesRef.current = 0;
+      setStableProgress(0);
+      setFaceStatus("error");
+      setFaceMessage("Face detection paused. Restart verification to try again.");
+      return;
     }
 
     animationFrameRef.current = requestAnimationFrame(runFaceDetection);
@@ -531,7 +597,19 @@ export default function ScanPage() {
    */
 
   const startSelfieCamera = async () => {
+    if (faceStartingRef.current || selfieStreamRef.current) {
+      return;
+    }
+
+    faceStartingRef.current = true;
+    const requestId = ++cameraRequestIdRef.current;
+
     try {
+      // A manual token can be submitted while the QR camera is still open.
+      // Release it before requesting the front camera to avoid camera-device
+      // contention, especially in Android WebViews.
+      await stopScanner();
+
       autoCaptureRef.current = false;
       stableFramesRef.current = 0;
 
@@ -559,24 +637,45 @@ export default function ScanPage() {
         audio: false,
       });
 
+      if (requestId !== cameraRequestIdRef.current) {
+        stream.getTracks().forEach((track) => track.stop());
+        return;
+      }
+
       selfieStreamRef.current = stream;
 
-      setSelfieStream(stream);
       setCameraActive(true);
 
       /*
        * Wait for React to attach the stream to the video element.
        */
-      requestAnimationFrame(async () => {
-        const video = videoRef.current;
-
-        if (!video) {
+      const attachCameraAndStartDetection = async () => {
+        if (
+          requestId !== cameraRequestIdRef.current ||
+          selfieStreamRef.current !== stream
+        ) {
           return;
         }
 
-        video.srcObject = stream;
+        const video = videoRef.current;
 
-        await video.play();
+        if (!video) {
+          // The video only mounts after `cameraActive` is rendered. Retrying
+          // avoids a timing race where the first animation frame runs before
+          // React has attached the ref, which previously left detection idle.
+          animationFrameRef.current = requestAnimationFrame(() => {
+            void attachCameraAndStartDetection();
+          });
+          return;
+        }
+
+        if (video.srcObject !== stream) video.srcObject = stream;
+
+        try {
+          await video.play();
+        } catch (e) {
+          if ((e as Error)?.name !== "AbortError") throw e;
+        }
 
         if (detector) {
           setFaceStatus("searching");
@@ -584,8 +683,16 @@ export default function ScanPage() {
 
           animationFrameRef.current = requestAnimationFrame(runFaceDetection);
         }
+      };
+
+      requestAnimationFrame(() => {
+        void attachCameraAndStartDetection();
       });
     } catch (error) {
+      if (requestId !== cameraRequestIdRef.current) {
+        return;
+      }
+
       console.error("Selfie camera error:", error);
 
       stopSelfieCamera();
@@ -599,6 +706,10 @@ export default function ScanPage() {
           "Please allow camera access and make sure your camera is available.",
         variant: "destructive",
       });
+    } finally {
+      if (requestId === cameraRequestIdRef.current) {
+        faceStartingRef.current = false;
+      }
     }
   };
 
@@ -626,8 +737,9 @@ export default function ScanPage() {
    * --------------------------------------------------------------------------
    */
 
-  const submitToken = async (value?: string) => {
-    const attendanceToken = (value ?? token).trim();
+  const submitToken = async (value?: string, capturedSelfie?: string) => {
+    const attendanceToken = (value ?? tokenRef.current).trim();
+    const selfieForSubmission = capturedSelfie ?? selfie;
 
     if (!attendanceToken) {
       toast({
@@ -646,11 +758,23 @@ export default function ScanPage() {
     /*
      * Face enrollment requires a fresh live selfie.
      */
-    if (hasFaceEnrollment && !selfie) {
+    if (hasFaceEnrollment && !selfieForSubmission) {
       setToken(attendanceToken);
+      tokenRef.current = attendanceToken;
       setLoading(false);
 
-      await startSelfieCamera();
+      try {
+        await startSelfieCamera();
+      } catch (error) {
+        console.error("Selfie camera failed to start:", error);
+        submittedRef.current = false;
+        toast({
+          title: "Camera unavailable",
+          description:
+            "Unable to start the selfie camera. Check camera permissions and try again.",
+          variant: "destructive",
+        });
+      }
 
       return;
     }
@@ -672,14 +796,15 @@ export default function ScanPage() {
 
       const body: Record<string, unknown> = {
         token: attendanceToken,
+        code: codeRef.current.trim().toUpperCase(),
         device_id: deviceId,
         lat: loc.lat,
         lng: loc.lng,
         accuracy: loc.accuracy,
       };
 
-      if (selfie) {
-        body.selfie = selfie;
+      if (selfieForSubmission) {
+        body.selfie = selfieForSubmission;
       }
 
       const {
@@ -706,7 +831,19 @@ export default function ScanPage() {
       }
 
       if (data.success === false) {
-        throw new Error(data.message || "Attendance verification failed.");
+        const failMessage = data.message || "Attendance verification failed.";
+
+        /*
+         * Location rejections get a retry prompt instead of a plain error.
+         */
+        if (/location|too far|range|distance|gps/i.test(failMessage)) {
+          setLocationError(failMessage);
+          submittedRef.current = false;
+          setLoading(false);
+          return;
+        }
+
+        throw new Error(failMessage);
       }
 
       toast({
@@ -716,6 +853,9 @@ export default function ScanPage() {
       });
 
       setToken("");
+      tokenRef.current = "";
+      setCode("");
+      codeRef.current = "";
       setSelfie(null);
       setLocation(null);
 
@@ -759,17 +899,39 @@ export default function ScanPage() {
    */
 
   const handleScanResult = async (decodedText: string) => {
-    const scannedToken = decodedText.trim();
+    try {
+      const { token: scannedToken, code: scannedCode } =
+        parseScanText(decodedText);
 
-    if (!scannedToken || submittedRef.current) {
-      return;
+      if (!scannedToken || submittedRef.current) {
+        return;
+      }
+
+      setToken(scannedToken);
+      tokenRef.current = scannedToken;
+      setCode(scannedCode);
+      codeRef.current = scannedCode;
+
+      await stopScanner();
+
+      await submitToken(scannedToken);
+    } catch (error) {
+      /*
+       * This callback is invoked by the QR scanner library, so a rejection
+       * here is unhandled and crashes the page. Never let it escape.
+       */
+      console.error("QR scan handling failed:", error);
+      submittedRef.current = false;
+      setLoading(false);
+      toast({
+        title: "Scan failed",
+        description:
+          error instanceof Error
+            ? error.message
+            : "Unable to process the scanned code. Please try again.",
+        variant: "destructive",
+      });
     }
-
-    setToken(scannedToken);
-
-    await stopScanner();
-
-    await submitToken(scannedToken);
   };
 
   /*
@@ -779,6 +941,12 @@ export default function ScanPage() {
    */
 
   const startScanner = async () => {
+    if (qrStartingRef.current || scannerRef.current?.isScanning) {
+      return;
+    }
+
+    qrStartingRef.current = true;
+
     try {
       if (scannerRef.current) {
         await stopScanner();
@@ -807,12 +975,16 @@ export default function ScanPage() {
     } catch (error) {
       console.error("QR scanner error:", error);
 
+      await stopScanner();
+
       toast({
         title: "Scanner unavailable",
         description:
           "Unable to start the QR scanner. Check camera permissions and try again.",
         variant: "destructive",
       });
+    } finally {
+      qrStartingRef.current = false;
     }
   };
 
@@ -853,9 +1025,18 @@ export default function ScanPage() {
   useEffect(() => {
     if (user && faceChecked && hasFaceEnrollment && !loading && !cameraActive) {
       const urlToken = searchParams.get("token");
+      const urlCode = (searchParams.get("c") ?? "").trim().toUpperCase();
 
       if (urlToken) {
+        if (urlTokenHandledRef.current === urlToken) {
+          return;
+        }
+
+        urlTokenHandledRef.current = urlToken;
         setToken(urlToken);
+        tokenRef.current = urlToken;
+        setCode(urlCode);
+        codeRef.current = urlCode;
         void submitToken(urlToken);
       }
     }
@@ -1094,13 +1275,26 @@ export default function ScanPage() {
             )}
 
             {!loading && cameraActive && (
-              <Button
-                variant="outline"
-                className="w-full"
-                onClick={cancelSelfie}
-              >
-                Cancel Verification
-              </Button>
+              <div className="grid gap-3 sm:grid-cols-2">
+                {faceStatus === "error" && (
+                  <Button
+                    className="w-full"
+                    onClick={() => {
+                      stopSelfieCamera();
+                      void startSelfieCamera();
+                    }}
+                  >
+                    <RefreshCw className="mr-2 h-4 w-4" /> Try Again
+                  </Button>
+                )}
+                <Button
+                  variant="outline"
+                  className="w-full"
+                  onClick={cancelSelfie}
+                >
+                  Cancel Verification
+                </Button>
+              </div>
             )}
           </CardContent>
         </Card>
@@ -1166,10 +1360,41 @@ export default function ScanPage() {
           <div className="space-y-3">
             <Input
               value={token}
-              onChange={(event) => setToken(event.target.value)}
+              onChange={(event) => {
+                const parsed = parseScanText(event.target.value);
+                setToken(parsed.token);
+                tokenRef.current = parsed.token;
+                if (parsed.code) {
+                  setCode(parsed.code);
+                  codeRef.current = parsed.code;
+                }
+              }}
               placeholder="Enter attendance token"
               disabled={loading}
             />
+
+            <div className="space-y-1">
+              <Input
+                value={code}
+                onChange={(event) => {
+                  const next = event.target.value
+                    .toUpperCase()
+                    .replace(/[^A-Z0-9]/g, "")
+                    .slice(0, 6);
+                  setCode(next);
+                  codeRef.current = next;
+                }}
+                placeholder="6-digit code shown on screen"
+                maxLength={6}
+                inputMode="text"
+                autoCapitalize="characters"
+                className="text-center font-mono text-lg tracking-[0.4em]"
+                disabled={loading}
+              />
+              <p className="text-xs text-muted-foreground">
+                The code under the QR changes every 30 seconds — type the one showing now.
+              </p>
+            </div>
 
             <Button
               className="w-full"
@@ -1234,6 +1459,56 @@ export default function ScanPage() {
           </div>
         </CardContent>
       </Card>
+
+      <AlertDialog
+        open={locationError !== null}
+        onOpenChange={(open) => {
+          if (!open) {
+            setLocationError(null);
+          }
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Location problem</AlertDialogTitle>
+            <AlertDialogDescription>{locationError}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                /*
+                 * Back to scan: clear the attempt so the student can
+                 * rescan the QR code from the beginning.
+                 */
+                setLocationError(null);
+                setToken("");
+                tokenRef.current = "";
+                setCode("");
+                codeRef.current = "";
+                setSelfie(null);
+                submittedRef.current = false;
+                autoCaptureRef.current = false;
+                setFaceStatus("searching");
+                setFaceMessage("Ready for the next attendance scan.");
+              }}
+            >
+              Back to scan
+            </Button>
+            <Button
+              onClick={() => {
+                /*
+                 * Retry: re-run verification with the same scanned token.
+                 */
+                setLocationError(null);
+                void submitToken();
+              }}
+            >
+              Retry location
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

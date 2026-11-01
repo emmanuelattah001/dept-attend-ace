@@ -43,24 +43,25 @@ import {
   XCircle,
   Search,
   Database,
-  BookOpen,
   AlertCircle,
   RefreshCw,
   WifiOff,
   Loader2,
   QrCode,
   KeyRound,
+  Smartphone,
   Copy,
   ShieldCheck,
 } from "lucide-react";
 import DashboardLayout from "@/components/DashboardLayout";
-import { SheetsActions } from "@/components/SheetsActions";
-import { SheetsSettingsDialog } from "@/components/SheetsSettingsDialog";
 import { ProgressSummary } from "@/components/ProgressSummary";
 import LoadingScreen from "@/components/LoadingScreen";
 import { QRCodeCanvas } from "qrcode.react";
 import { LocationPicker } from "@/components/LocationPicker";
-import * as XLSX from "xlsx";
+import { DashboardHeader } from "@/components/dept-admin/DashboardHeader";
+import { CourseSelector } from "@/components/dept-admin/CourseSelector";
+import { DepartmentToolbar } from "@/components/dept-admin/DepartmentToolbar";
+import type { DepartmentCourse } from "@/components/dept-admin/types";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 
@@ -69,13 +70,6 @@ interface Student {
   name: string;
   gender: string | null;
   matric_no: string | null;
-  department_id: string;
-}
-
-interface Course {
-  id: string;
-  name: string;
-  code: string;
   department_id: string;
 }
 
@@ -109,7 +103,7 @@ const DeptAdminDashboard = () => {
   const { profile, user } = useAuth();
   const [students, setStudents] = useState<Student[]>([]);
   const [departmentName, setDepartmentName] = useState<string>("");
-  const [courses, setCourses] = useState<Course[]>([]);
+  const [courses, setCourses] = useState<DepartmentCourse[]>([]);
   const [selectedCourse, setSelectedCourse] = useState<string>("");
   const [dateColumns, setDateColumns] = useState<string[]>([
     new Date().toISOString().split("T")[0],
@@ -182,11 +176,16 @@ const DeptAdminDashboard = () => {
     const id = setInterval(() => setNow(Date.now()), 1000);
     let cancelled = false;
     const pull = async () => {
-      const { data } = await supabase.functions.invoke("session-token", {
+      const { data, error } = await supabase.functions.invoke("session-token", {
         body: { token: qrSession.token },
       });
-      if (!cancelled && (data as any)?.code)
-        setRotatingCode((data as any).code);
+      if (cancelled) return;
+      if (error) {
+        console.error("session-token failed", error);
+        setRotatingCode(null);
+        return;
+      }
+      if ((data as any)?.code) setRotatingCode((data as any).code);
     };
     pull();
     const poll = setInterval(pull, 10_000);
@@ -388,7 +387,7 @@ const DeptAdminDashboard = () => {
       if (error) throw error;
 
       if (data && data.length > 0) {
-        setCourses(data as Course[]);
+        setCourses(data as DepartmentCourse[]);
         if (!selectedCourse) {
           setSelectedCourse(data[0].id);
         }
@@ -868,7 +867,7 @@ const DeptAdminDashboard = () => {
     toast.success("CSV exported successfully");
   };
 
-  const exportExcel = () => {
+  const exportExcel = async () => {
     if (students.length === 0) {
       toast.error("No students to export");
       return;
@@ -893,22 +892,30 @@ const DeptAdminDashboard = () => {
       return row;
     });
 
-    const worksheet = XLSX.utils.json_to_sheet(data);
-    const cols = Object.keys(data[0]).map((key) => ({
-      wch:
-        Math.max(
-          key.length,
-          ...data.map((row) => String(row[key] || "").length),
-        ) + 2,
+    // exceljs is loaded on demand (keeps the main bundle small)
+    const ExcelJS = (await import("exceljs")).default;
+    const workbook = new ExcelJS.Workbook();
+    const worksheet = workbook.addWorksheet("Attendance");
+    const keys = Object.keys(data[0]);
+    worksheet.columns = keys.map((key) => ({
+      header: key,
+      key,
+      width:
+        Math.max(key.length, ...data.map((row) => String(row[key] || "").length)) + 2,
     }));
-    worksheet["!cols"] = cols;
-
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, "Attendance");
-    XLSX.writeFile(
-      workbook,
-      `attendance_${departmentName}_${currentCourse?.code || "all"}.xlsx`,
+    data.forEach((row) => worksheet.addRow(row));
+    worksheet.getRow(1).font = { bold: true };
+    const buffer = await workbook.xlsx.writeBuffer();
+    const blobUrl = URL.createObjectURL(
+      new Blob([buffer], {
+        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      }),
     );
+    const link = document.createElement("a");
+    link.href = blobUrl;
+    link.download = `attendance_${departmentName}_${currentCourse?.code || "all"}.xlsx`;
+    link.click();
+    URL.revokeObjectURL(blobUrl);
     toast.success("Excel exported successfully");
   };
 
@@ -979,7 +986,7 @@ const DeptAdminDashboard = () => {
       doc.setFontSize(60);
       doc.setTextColor(200, 200, 200);
       doc.setGState(new (doc as any).GState({ opacity: 0.4 }));
-      doc.text("Attendtrack", pageWidth / 2, pageHeight / 2, {
+      doc.text("Smart Attendance", pageWidth / 2, pageHeight / 2, {
         align: "center",
         angle: 45,
       });
@@ -1523,6 +1530,23 @@ const DeptAdminDashboard = () => {
     }
   };
 
+  // One-time passwords are shown ONCE (they are never stored in readable form).
+  type TempCredential = { name: string; matric_no: string; temp_password: string };
+  const [credentials, setCredentials] = useState<TempCredential[] | null>(null);
+  const downloadCredentials = () => {
+    if (!credentials) return;
+    const esc = (v: string) => `"${String(v).replace(/"/g, '""')}"`;
+    const csv =
+      "name,matric_no,temporary_password\n" +
+      credentials.map((c) => [c.name, c.matric_no, c.temp_password].map(esc).join(",")).join("\n");
+    const url = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "student_temporary_passwords.csv";
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   const provisionStudentLogins = async () => {
     setProvisioningAuth(true);
     try {
@@ -1542,6 +1566,10 @@ const DeptAdminDashboard = () => {
       const failed =
         (data as any)?.results?.filter((r: any) => r.error || r.skipped)
           .length ?? 0;
+      const creds: TempCredential[] = ((data as any)?.results ?? []).filter(
+        (r: any) => r.temp_password,
+      );
+      if (creds.length) setCredentials(creds);
       toast.success(
         `Provisioned ${created} new, ${existing} already had logins${failed ? `, ${failed} skipped/failed` : ""}.`,
       );
@@ -1556,7 +1584,7 @@ const DeptAdminDashboard = () => {
   const resetStudentLogins = async () => {
     if (
       !confirm(
-        "Reset one-time login lock for ALL students in your department? They will be able to sign in again once.",
+        "Clear the login lock for ALL students in your department? (Passwords, faces and bound devices are NOT changed. Use the per-student reset for that.)",
       )
     )
       return;
@@ -1588,7 +1616,7 @@ const DeptAdminDashboard = () => {
   ) => {
     if (
       !confirm(
-        `Reset one-time login lock for ${studentName}? They will be able to sign in again once.`,
+        `Reset ${studentName}'s account? This issues a NEW temporary password and clears their enrolled face and bound device. They must sign in, change the password and re-enroll their face.`,
       )
     )
       return;
@@ -1602,9 +1630,40 @@ const DeptAdminDashboard = () => {
       );
       if (error || (data as any)?.error)
         throw new Error((data as any)?.error || error?.message);
-      toast.success(`Login lock reset for ${studentName}.`);
+      const r = (data as any)?.results?.[0];
+      if (r?.temp_password)
+        setCredentials([
+          { name: r.name ?? studentName, matric_no: r.matric_no ?? "", temp_password: r.temp_password },
+        ]);
+      toast.success(`Account reset for ${studentName}.`);
     } catch (e: any) {
       toast.error(e.message ?? "Failed to reset login");
+    } finally {
+      setResettingStudentId(null);
+    }
+  };
+
+  const resetSingleStudentDevice = async (
+    studentId: string,
+    studentName: string,
+  ) => {
+    if (
+      !confirm(
+        `Unbind ${studentName}'s device? They can register a new phone on their next scan.`,
+      )
+    )
+      return;
+    setResettingStudentId(studentId);
+    try {
+      const { data, error } = await supabase.functions.invoke(
+        "provision-student-auth",
+        { body: { action: "reset_device", student_id: studentId } },
+      );
+      if (error || (data as any)?.error)
+        throw new Error((data as any)?.error || error?.message);
+      toast.success(`Device unbound for ${studentName}.`);
+    } catch (e: any) {
+      toast.error(e.message ?? "Failed to reset device");
     } finally {
       setResettingStudentId(null);
     }
@@ -1617,200 +1676,72 @@ const DeptAdminDashboard = () => {
   return (
     <DashboardLayout>
       <div className="space-y-6">
-        <div className="flex flex-wrap justify-between items-start gap-3">
-          <div className="min-w-0">
-            <h2 className="text-xl sm:text-2xl font-bold">
-              Department Admin Dashboard
-            </h2>
-            <p className="text-muted-foreground text-sm mt-1 truncate">
-              Department:{" "}
-              <span className="font-semibold text-foreground">
-                {departmentName}
-              </span>
-            </p>
+      <Dialog open={!!credentials} onOpenChange={(o) => !o && setCredentials(null)}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Temporary passwords</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            Shown only once. Give each student their password privately (or download the CSV). They will be
+            asked to choose a new password on first login.
+          </p>
+          <div className="max-h-72 overflow-auto rounded-md border text-sm">
+            <table className="w-full">
+              <thead className="bg-muted/50 text-left">
+                <tr><th className="p-2">Name</th><th className="p-2">Matric</th><th className="p-2">Password</th></tr>
+              </thead>
+              <tbody>
+                {(credentials ?? []).map((c) => (
+                  <tr key={c.matric_no} className="border-t">
+                    <td className="p-2">{c.name}</td>
+                    <td className="p-2">{c.matric_no}</td>
+                    <td className="p-2 font-mono">{c.temp_password}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
-          <div className="flex items-center gap-2">
-            {connectionStatus === "online" ? (
-              <Badge className="bg-green-100 text-green-800">
-                <Check className="w-3 h-3 mr-1" /> Online
-              </Badge>
-            ) : connectionStatus === "offline" ? (
-              <Badge className="bg-red-100 text-red-800">
-                <WifiOff className="w-3 h-3 mr-1" /> Offline
-              </Badge>
-            ) : (
-              <Badge variant="outline">
-                <Loader2 className="w-3 h-3 mr-1 animate-spin" /> Checking
-              </Badge>
-            )}
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" onClick={downloadCredentials}>Download CSV</Button>
+            <Button onClick={() => setCredentials(null)}>Done</Button>
           </div>
-        </div>
+        </DialogContent>
+      </Dialog>
+        <DashboardHeader
+          departmentName={departmentName}
+          connectionStatus={connectionStatus}
+        />
 
         <ProgressSummary department={departmentName} />
 
-        <Card>
-          <CardHeader>
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-              <div>
-                <CardTitle className="text-lg flex items-center gap-2">
-                  <BookOpen className="w-5 h-5" /> Courses / Subjects
-                </CardTitle>
-                <p className="text-sm text-muted-foreground">
-                  Add courses like PHY 101, CHM 101 to mark attendance
-                  separately
-                </p>
-              </div>
-              <Dialog
-                open={showCourseDialog}
-                onOpenChange={setShowCourseDialog}
-              >
-                <DialogTrigger asChild>
-                  <Button size="sm">
-                    <Plus className="w-4 h-4 mr-1" /> Add Course
-                  </Button>
-                </DialogTrigger>
-                <DialogContent>
-                  <DialogHeader>
-                    <DialogTitle>Add New Course</DialogTitle>
-                  </DialogHeader>
-                  <div className="space-y-4 pt-2">
-                    <div>
-                      <label className="text-sm font-medium">
-                        Course Code *
-                      </label>
-                      <Input
-                        value={newCourse.code}
-                        onChange={(e) =>
-                          setNewCourse((p) => ({ ...p, code: e.target.value }))
-                        }
-                        placeholder="e.g., PHY 101, CHM 101"
-                      />
-                    </div>
-                    <div>
-                      <label className="text-sm font-medium">
-                        Course Name *
-                      </label>
-                      <Input
-                        value={newCourse.name}
-                        onChange={(e) =>
-                          setNewCourse((p) => ({ ...p, name: e.target.value }))
-                        }
-                        placeholder="e.g., General Physics, Organic Chemistry"
-                      />
-                    </div>
-                    <Button
-                      onClick={addCourse}
-                      disabled={addingCourse}
-                      className="w-full"
-                    >
-                      {addingCourse ? (
-                        <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                      ) : (
-                        <Plus className="w-4 h-4 mr-2" />
-                      )}
-                      {addingCourse ? "Adding..." : "Add Course"}
-                    </Button>
-                  </div>
-                </DialogContent>
-              </Dialog>
-            </div>
-          </CardHeader>
-          <CardContent>
-            <div className="flex flex-wrap gap-2">
-              <Button
-                variant={!selectedCourse ? "default" : "outline"}
-                size="sm"
-                onClick={() => setSelectedCourse("")}
-                className="mb-2"
-              >
-                All Courses
-              </Button>
-              {courses.map((course) => (
-                <Button
-                  key={course.id}
-                  variant={selectedCourse === course.id ? "default" : "outline"}
-                  size="sm"
-                  onClick={() => setSelectedCourse(course.id)}
-                  className="mb-2"
-                >
-                  {course.code}
-                </Button>
-              ))}
-              {courses.length === 0 && (
-                <p className="text-muted-foreground text-sm">
-                  No courses added yet. Click "Add Course" to create one.
-                </p>
-              )}
-            </div>
-          </CardContent>
-        </Card>
+        <CourseSelector
+          courses={courses}
+          selectedCourse={selectedCourse}
+          onSelectCourse={setSelectedCourse}
+          open={showCourseDialog}
+          onOpenChange={setShowCourseDialog}
+          newCourse={newCourse}
+          onNewCourseChange={setNewCourse}
+          onAddCourse={() => void addCourse()}
+          addingCourse={addingCourse}
+        />
 
-        <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3 border-b pb-2">
-          <div className="flex gap-1 overflow-x-auto -mx-1 px-1 scrollbar-thin">
-            {tabs.map((tab) => (
-              <button
-                key={tab.id}
-                onClick={() => setActiveTab(tab.id)}
-                className={`flex items-center gap-2 px-3 sm:px-4 py-2.5 text-sm font-medium border-b-2 whitespace-nowrap transition-colors ${
-                  activeTab === tab.id
-                    ? "border-primary text-primary"
-                    : "border-transparent text-muted-foreground hover:text-foreground"
-                }`}
-              >
-                <tab.icon className="w-4 h-4" /> {tab.label}
-              </button>
-            ))}
-          </div>
-          <div className="flex flex-wrap gap-2">
-            <Button
-              size="sm"
-              variant="default"
-              onClick={() => {
-                setQrCourseId(selectedCourse || "");
-                setShowQrDialog(true);
-              }}
-            >
-              <QrCode className="w-4 h-4 sm:mr-1" />{" "}
-              <span className="hidden sm:inline">Live QR Session</span>
-              <span className="sm:hidden">QR</span>
-            </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={provisionStudentLogins}
-              disabled={provisioningAuth}
-            >
-              {provisioningAuth ? (
-                <Loader2 className="w-4 h-4 sm:mr-1 animate-spin" />
-              ) : (
-                <KeyRound className="w-4 h-4 sm:mr-1" />
-              )}
-              <span className="hidden sm:inline">Create Student Logins</span>
-              <span className="sm:hidden">Create</span>
-            </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={resetStudentLogins}
-              disabled={resettingLogins}
-            >
-              {resettingLogins ? (
-                <Loader2 className="w-4 h-4 sm:mr-1 animate-spin" />
-              ) : (
-                <KeyRound className="w-4 h-4 sm:mr-1" />
-              )}
-              <span className="hidden sm:inline">Reset Login Lock</span>
-              <span className="sm:hidden">Reset</span>
-            </Button>
-            <SheetsActions
-              busy={sheetsBusy}
-              size="sm"
-              onExport={() => pushToGoogleSheets("export_all")}
-              onSync={() => pushToGoogleSheets("sync_unsynced")}
-            />
-            <SheetsSettingsDialog />
-          </div>
-        </div>
+        <DepartmentToolbar
+          tabs={tabs}
+          activeTab={activeTab}
+          onTabChange={setActiveTab}
+          onOpenQr={() => {
+            setQrCourseId(selectedCourse || "");
+            setShowQrDialog(true);
+          }}
+          onProvisionLogins={() => void provisionStudentLogins()}
+          provisioningAuth={provisioningAuth}
+          onResetLogins={() => void resetStudentLogins()}
+          resettingLogins={resettingLogins}
+          sheetsBusy={sheetsBusy}
+          onExportSheets={() => void pushToGoogleSheets("export_all")}
+          onSyncSheets={() => void pushToGoogleSheets("sync_unsynced")}
+        />
 
         <Dialog
           open={showQrDialog}
@@ -1955,14 +1886,18 @@ const DeptAdminDashboard = () => {
                       <QRCodeCanvas value={scanUrl} size={240} includeMargin />
                     </div>
 
-                    {rotatingCode && (
-                      <p className="text-sm">
-                        Rotating code:{" "}
+                    <p className="text-sm">
+                      Rotating code:{" "}
+                      {rotatingCode ? (
                         <span className="font-mono font-bold tracking-widest">
                           {rotatingCode}
                         </span>
-                      </p>
-                    )}
+                      ) : (
+                        <span className="text-muted-foreground">
+                          loading…
+                        </span>
+                      )}
+                    </p>
 
                     <p className="text-2xl font-mono font-bold">
                       {expired ? "EXPIRED" : `${mm}:${ss}`}
@@ -2056,7 +1991,7 @@ const DeptAdminDashboard = () => {
                   </Button>
                   <Button
                     variant="outline"
-                    onClick={exportExcel}
+                    onClick={() => void exportExcel()}
                     disabled={students.length === 0}
                   >
                     <Download className="w-4 h-4 mr-1" /> Excel
@@ -2521,7 +2456,7 @@ const DeptAdminDashboard = () => {
                                 <Button
                                   variant="ghost"
                                   size="icon"
-                                  title="Reset one-time login lock"
+                                  title="Reset account (new password, face & device)"
                                   onClick={() =>
                                     resetSingleStudentLogin(
                                       student.id,
@@ -2535,6 +2470,20 @@ const DeptAdminDashboard = () => {
                                   ) : (
                                     <KeyRound className="w-4 h-4" />
                                   )}
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  title="Unbind this student's device"
+                                  onClick={() =>
+                                    resetSingleStudentDevice(
+                                      student.id,
+                                      student.name,
+                                    )
+                                  }
+                                  disabled={resettingStudentId === student.id}
+                                >
+                                  <Smartphone className="w-4 h-4" />
                                 </Button>
                                 <Button
                                   variant="ghost"

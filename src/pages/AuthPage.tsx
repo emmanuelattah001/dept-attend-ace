@@ -30,7 +30,8 @@ const AuthPage = () => {
     setLoading(true);
     try {
       const synthetic = matricToEmail(matricNo);
-      const pwd = password || matricNo.trim().toLowerCase();
+      const pwd = password;
+      if (!pwd) throw new Error('Enter the password given to you by your course rep.');
       const { error } = await supabase.auth.signInWithPassword({ email: synthetic, password: pwd });
       if (error) throw error;
 
@@ -93,7 +94,7 @@ const AuthPage = () => {
           <div className="mx-auto w-12 h-12 bg-primary rounded-xl flex items-center justify-center mb-2">
             <ClipboardCheck className="w-6 h-6 text-primary-foreground" />
           </div>
-          <CardTitle className="text-2xl">Attendance System</CardTitle>
+          <CardTitle className="text-2xl">Smart Attendance</CardTitle>
           <CardDescription>{isLogin ? 'Sign in to your account' : 'Create a new account'}</CardDescription>
         </CardHeader>
         <CardContent>
@@ -128,12 +129,12 @@ const AuthPage = () => {
                 <label className="text-sm font-medium">Password</label>
                 <Input
                   type="password"
-                  placeholder="Default = your matric number"
+                  placeholder="Password from your course rep"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                 />
                 <p className="text-xs text-muted-foreground mt-1">
-                  Your first-time password is your matric number (lowercase).
+                  Use the temporary password your course rep gave you. You will be asked to change it after signing in.
                 </p>
               </div>
               <Button type="submit" className="w-full" disabled={loading}>

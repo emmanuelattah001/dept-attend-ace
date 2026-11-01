@@ -2,10 +2,12 @@
 //   Attendance      — append-only log of every attendance row (dedup by attendance_id)
 //   Student Progress — one row per (matric_no, course_code); percentage precomputed here
 //
-// Public action: lookup_by_matric  (reads Attendance tab)
-// Auth actions : append | sync_unsynced | export_all
+// Public action: lookup_by_matric  (read-only, exact matric, rate limited)
+// Staff actions: append | sync_unsynced | export_all (dept_admin / super_admin / service role)
+//                read_all (staff, scoped to own department unless super_admin)
 import { createClient } from 'npm:@supabase/supabase-js@2';
 import { corsHeaders } from 'npm:@supabase/supabase-js@2/cors';
+import { getCaller, hasAnyRole, ADMIN_ROLES, STAFF_ROLES, rateLimited, clientIp } from '../_shared/auth.ts';
 
 const ATTENDANCE_TAB = 'Attendance';
 const PROGRESS_TAB = 'Student Progress';
@@ -193,11 +195,11 @@ Deno.serve(async (req) => {
     const sid: string | undefined = (settingRow?.value as any)?.id ?? Deno.env.get('GOOGLE_SHEET_ID') ?? undefined;
     if (!sid) throw new Error('GOOGLE_SHEET_ID not configured. Set the secret or app_settings.google_sheet_id.');
 
-    // public lookup
+    // public lookup: read-only, exact matric, no writes to Google, rate limited
     if (action === 'lookup_by_matric') {
+      if (rateLimited(`lookup:${clientIp(req)}`, 30)) return new Response(JSON.stringify({ ok: false, error: 'Too many requests' }), { status: 429, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
       const matric = String(body.matric_no ?? '').trim().toLowerCase();
-      if (!matric) return new Response(JSON.stringify({ ok: false, error: 'matric_no required' }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
-      await ensureTabs(token, sid);
+      if (!matric || matric.length < 4) return new Response(JSON.stringify({ ok: false, error: 'matric_no required' }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
       const all = await readAttendanceRows(token, sid);
       const rows = all.filter(r => (r[2] ?? '').toLowerCase() === matric).map(r => ({
         attendance_id: r[0], student_name: r[1], matric_no: r[2], gender: r[3], department: r[4],
@@ -206,27 +208,20 @@ Deno.serve(async (req) => {
       return new Response(JSON.stringify({ ok: true, rows }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
-    // auth check for other actions
-    const authHeader = req.headers.get('Authorization');
-    if (!authHeader?.startsWith('Bearer ')) return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
-    const sb = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_ANON_KEY')!, { global: { headers: { Authorization: authHeader } } });
-    const { data: claims, error: cerr } = await sb.auth.getClaims(authHeader.replace('Bearer ', ''));
-    if (cerr || !claims?.claims) return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    // every other action requires a signed-in staff member (or the service role)
+    const caller = await getCaller(req, admin);
+    if (caller.anonymous) return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    const needed = action === 'read_all' ? STAFF_ROLES : ADMIN_ROLES;
+    if (!hasAnyRole(caller, needed)) return new Response(JSON.stringify({ error: 'Forbidden' }), { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
 
     await ensureTabs(token, sid);
 
     if (action === 'read_all') {
-      // Auth already verified above. Scope to caller's department unless super_admin.
-      const userId = (claims.claims as any).sub as string;
-      const { data: roles } = await admin.from('user_roles').select('role').eq('user_id', userId);
-      const isSuper = roles?.some((r: any) => r.role === 'super_admin');
+      const isSuper = caller.isService || caller.roles.includes('super_admin');
       let deptName: string | null = null;
-      if (!isSuper) {
-        const { data: prof } = await admin.from('profiles').select('department_id').eq('user_id', userId).maybeSingle();
-        if (prof?.department_id) {
-          const { data: dept } = await admin.from('departments').select('name').eq('id', prof.department_id).maybeSingle();
-          deptName = dept?.name ?? null;
-        }
+      if (!isSuper && caller.departmentId) {
+        const { data: dept } = await admin.from('departments').select('name').eq('id', caller.departmentId).maybeSingle();
+        deptName = dept?.name ?? null;
       }
       const all = await readAttendanceRows(token, sid);
       const rows = all
@@ -238,6 +233,10 @@ Deno.serve(async (req) => {
       return new Response(JSON.stringify({ ok: true, rows, spreadsheetId: sid, spreadsheetUrl: `https://docs.google.com/spreadsheets/d/${sid}` }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
+    // `append` may only touch ids the caller is allowed to see (non-super admins: own department)
+    if (action === 'append' && !(caller.isService || caller.roles.includes('super_admin'))) {
+      if (!Array.isArray(body.ids) || !body.ids.length) return new Response(JSON.stringify({ error: 'ids required' }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    }
 
     const dbRows = await fetchAttendance(admin, action, body.ids);
     console.log(`sheets-sync[${action}]: fetched ${dbRows.length} rows`);
@@ -251,16 +250,27 @@ Deno.serve(async (req) => {
     }
 
     if (action === 'export_all') {
-      const values = dbRows.map((r: any) => [
-        r.id, r.students?.name ?? '', r.students?.matric_no ?? '', r.students?.gender ?? '',
-        r.departments?.name ?? '', r.courses?.code ?? '', r.courses?.name ?? '',
-        r.date, r.status, new Date().toISOString(),
-      ]);
+      // Merge (never blindly overwrite): the database only keeps recent rows after cleanup,
+      // so Sheets history must be preserved. DB rows win for the same attendance id.
+      const existing = await readAttendanceRows(token, sid);
+      const merged = new Map<string, any[]>();
+      for (const row of existing) if (row[0]) merged.set(String(row[0]), row);
+      const syncedAt = new Date().toISOString();
+      for (const r of dbRows as any[]) {
+        merged.set(String(r.id), [
+          r.id, r.students?.name ?? '', r.students?.matric_no ?? '', r.students?.gender ?? '',
+          r.departments?.name ?? '', r.courses?.code ?? '', r.courses?.name ?? '',
+          r.date, r.status, syncedAt,
+        ]);
+      }
+      const values = Array.from(merged.values());
       await overwriteTab(token, sid, ATTENDANCE_TAB, ATTENDANCE_HEADER, values);
       const progress = buildProgress(values as any);
       await overwriteTab(token, sid, PROGRESS_TAB, PROGRESS_HEADER, progress);
       const ids = dbRows.map((r: any) => r.id);
-      if (ids.length) await admin.from('attendance').update({ synced_to_sheets: true, synced_at: new Date().toISOString() }).in('id', ids);
+      for (let i = 0; i < ids.length; i += 200) {
+        await admin.from('attendance').update({ synced_to_sheets: true, synced_at: syncedAt }).in('id', ids.slice(i, i + 200));
+      }
       return new Response(JSON.stringify({ ok: true, exported: values.length, spreadsheetId: sid }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 

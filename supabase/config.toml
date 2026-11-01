@@ -8,3 +8,16 @@ verify_jwt = true
 
 [functions.session-token]
 verify_jwt = true
+
+# These functions validate the caller themselves (see _shared/auth.ts), so the platform JWT gate is
+# disabled to keep them working with both legacy (JWT) and new (sb_publishable_) API keys.
+# get-student-progress / sheets-sync allow ONLY a rate-limited exact-matric lookup anonymously.
+[functions.get-student-progress]
+verify_jwt = false
+
+[functions.sheets-sync]
+verify_jwt = false
+
+# cleanup-attendance requires the service-role key or the CRON_SECRET header.
+[functions.cleanup-attendance]
+verify_jwt = false

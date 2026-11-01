@@ -1,5 +1,4 @@
-// Provision Supabase auth accounts for students of the caller's department.
-// Email = synthetic <matric>@students.attendtrack.app, password = matric_no (lowercase).
+
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.4';
 
 const corsHeaders = {
@@ -9,6 +8,24 @@ const corsHeaders = {
 };
 
 const SYNTHETIC_DOMAIN = 'students.attendtrack.app';
+
+function randomPassword(len = 10): string {
+  // unambiguous alphabet (no 0/O/1/l/I)
+  const chars = 'abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  const bytes = crypto.getRandomValues(new Uint8Array(len));
+  return Array.from(bytes, (b) => chars[b % chars.length]).join('');
+}
+
+async function findUserByEmail(admin: any, email: string) {
+  for (let page = 1; page <= 50; page++) {
+    const { data, error } = await admin.auth.admin.listUsers({ page, perPage: 200 });
+    if (error) return null;
+    const hit = data?.users?.find((u: any) => u.email?.toLowerCase() === email);
+    if (hit) return hit;
+    if (!data?.users || data.users.length < 200) return null;
+  }
+  return null;
+}
 
 function matricToEmail(matric: string) {
   const clean = matric.trim().toLowerCase().replace(/[^a-z0-9]/g, '');
@@ -60,26 +77,46 @@ Deno.serve(async (req) => {
       if (!isSuper && s.department_id !== callerDept) { results.push({ id: s.id, skipped: 'other dept' }); continue; }
 
       const email = matricToEmail(s.matric_no);
-      const password = s.matric_no.trim().toLowerCase();
+      const password = randomPassword();
 
       let authUserId = s.auth_user_id as string | null;
 
-      if (action === 'reset_login') {
-        await admin.from('students').update({ first_login_at: null }).eq('id', s.id);
+      if (action === 'reset_login' || action === 'reset_device') {
+        // Clears the login lock, device binding and (for a full reset) the enrolled face.
+        // A FULL reset (new password + face + device) only happens for a single named student.
+        // The bulk variant (no student_id) only clears the login lock, so a whole class is never wiped by accident.
+        const full = action === 'reset_login' && !!student_id;
+        const patch: Record<string, unknown> = { first_login_at: null };
+        if (action === 'reset_device' || full) patch.device_fingerprint = null;
+        if (full) patch.face_url = null;
+        await admin.from('students').update(patch).eq('id', s.id);
+        if (full && authUserId) {
+          await admin.auth.admin.updateUserById(authUserId, {
+            password,
+            user_metadata: { name: s.name, matric_no: s.matric_no, is_student: true, must_change_password: true },
+          });
+        }
         await admin.from('student_login_events').insert({
           student_id: s.id,
           department_id: s.department_id,
           matric_no: s.matric_no,
-          event: 'reset',
+          event: action === 'reset_device' ? 'device_reset' : 'reset',
           actor_user_id: user.id,
         });
-        results.push({ id: s.id, name: s.name, matric_no: s.matric_no, status: 'login_reset' });
+        results.push({
+          id: s.id, name: s.name, matric_no: s.matric_no,
+          status: action === 'reset_device' ? 'device_reset' : 'login_reset',
+          ...(full && authUserId ? { temp_password: password } : {}),
+        });
         continue;
       }
 
       if (action === 'reset_password' && authUserId) {
-        await admin.auth.admin.updateUserById(authUserId, { password });
-        results.push({ id: s.id, name: s.name, matric_no: s.matric_no, email, status: 'password_reset' });
+        await admin.auth.admin.updateUserById(authUserId, {
+          password,
+          user_metadata: { name: s.name, matric_no: s.matric_no, is_student: true, must_change_password: true },
+        });
+        results.push({ id: s.id, name: s.name, matric_no: s.matric_no, email, status: 'password_reset', temp_password: password });
         continue;
       }
 
@@ -90,16 +127,18 @@ Deno.serve(async (req) => {
         email,
         password,
         email_confirm: true,
-        user_metadata: { name: s.name, matric_no: s.matric_no, is_student: true },
+        user_metadata: { name: s.name, matric_no: s.matric_no, is_student: true, must_change_password: true },
       });
 
       if (createErr) {
-        // If user exists, look it up by email via listing
-        const { data: existing } = await admin.auth.admin.listUsers({ page: 1, perPage: 200 });
-        const found = existing?.users?.find((u: any) => u.email?.toLowerCase() === email);
+        // If user exists, look it up by email (paginated)
+        const found = await findUserByEmail(admin, email);
         if (found) {
           authUserId = found.id;
-          await admin.auth.admin.updateUserById(found.id, { password });
+          await admin.auth.admin.updateUserById(found.id, {
+            password,
+            user_metadata: { name: s.name, matric_no: s.matric_no, is_student: true, must_change_password: true },
+          });
         } else {
           results.push({ id: s.id, name: s.name, matric_no: s.matric_no, error: createErr.message });
           continue;
@@ -118,7 +157,7 @@ Deno.serve(async (req) => {
       }, { onConflict: 'user_id' });
       await admin.from('user_roles').upsert({ user_id: authUserId, role: 'student' }, { onConflict: 'user_id,role' });
 
-      results.push({ id: s.id, name: s.name, matric_no: s.matric_no, email, status: 'created' });
+      results.push({ id: s.id, name: s.name, matric_no: s.matric_no, email, status: 'created', temp_password: password });
     }
 
     return new Response(JSON.stringify({ ok: true, count: results.length, results }), {
@@ -126,7 +165,7 @@ Deno.serve(async (req) => {
     });
   } catch (e) {
     console.error('provision-student-auth error', e);
-    return new Response(JSON.stringify({ error: String((e as Error).message ?? e) }), {
+    return new Response(JSON.stringify({ error: 'Provisioning failed' }), {
       status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
   }

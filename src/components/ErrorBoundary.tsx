@@ -25,7 +25,9 @@ class ErrorBoundary extends Component<Props, State> {
       toast.error('Something went wrong', {
         description: error.message?.slice(0, 200) || 'Unexpected error occurred',
       });
-    } catch {}
+    } catch {
+      /* toast unavailable; ignore */
+    }
   }
 
   handleReset = () => {

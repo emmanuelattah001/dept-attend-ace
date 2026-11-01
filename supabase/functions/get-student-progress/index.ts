@@ -1,7 +1,12 @@
 // Reads the "Student Progress" and "Attendance" tabs and returns rows + a dashboard summary.
-// Public function: no auth required (matches lookup_by_matric pattern).
-import { createClient } from 'npm:@supabase/supabase-js@2';
+// Access rules:
+//   - anonymous / student callers MUST supply an exact matric_no and only ever receive that student's rows
+//   - dept_admin / staff callers are forced to their own department (super_admin may query any)
 import { corsHeaders } from 'npm:@supabase/supabase-js@2/cors';
+import { getCaller, makeAdminClient, hasAnyRole, STAFF_ROLES, rateLimited, clientIp } from '../_shared/auth.ts';
+
+const jsonRes = (body: unknown, status = 200) =>
+  new Response(JSON.stringify(body), { status, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
 
 const ATTENDANCE_TAB = 'Attendance';
 const PROGRESS_TAB = 'Student Progress';
@@ -52,12 +57,30 @@ Deno.serve(async (req) => {
     const body = req.method === 'POST' ? await req.json().catch(() => ({})) : {};
     const matric = String(body.matric_no ?? url.searchParams.get('matric_no') ?? '').trim().toLowerCase();
     const courseCode = String(body.course_code ?? url.searchParams.get('course_code') ?? '').trim().toLowerCase();
-    const department = String(body.department ?? url.searchParams.get('department') ?? '').trim().toLowerCase();
+    let department = String(body.department ?? url.searchParams.get('department') ?? '').trim().toLowerCase();
+
+    const adminDb = makeAdminClient();
+    const caller = await getCaller(req, adminDb);
+    const isStaff = hasAnyRole(caller, STAFF_ROLES);
+    const isSuper = caller.isService || caller.roles.includes('super_admin');
+
+    if (!isStaff) {
+      // anonymous or student: exact-matric lookup only, never a directory dump
+      if (rateLimited(`prog:${caller.userId ?? clientIp(req)}`, 30)) return jsonRes({ ok: false, error: 'Too many requests' }, 429);
+      if (!matric || matric.length < 4) return jsonRes({ ok: false, error: 'matric_no required' }, 400);
+      department = '';
+    } else if (!isSuper) {
+      // staff are locked to their own department
+      if (!caller.departmentId) return jsonRes({ ok: false, error: 'No department assigned' }, 403);
+      const { data: d } = await adminDb.from('departments').select('name').eq('id', caller.departmentId).maybeSingle();
+      if (!d?.name) return jsonRes({ ok: false, error: 'Department not found' }, 403);
+      department = String(d.name).trim().toLowerCase();
+    }
 
     const saJson = Deno.env.get('GOOGLE_SERVICE_ACCOUNT_JSON');
     if (!saJson) throw new Error('GOOGLE_SERVICE_ACCOUNT_JSON not configured');
     const sa = JSON.parse(saJson);
-    const admin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
+    const admin = adminDb;
     const { data: settingRow } = await admin.from('app_settings').select('value').eq('key', 'google_sheet_id').maybeSingle();
     const sid: string | undefined = (settingRow?.value as any)?.id ?? Deno.env.get('GOOGLE_SHEET_ID') ?? undefined;
     if (!sid) throw new Error('GOOGLE_SHEET_ID not configured');
@@ -105,7 +128,8 @@ Deno.serve(async (req) => {
         if (r.attendance_percentage >= 75) above75++; else below75++;
       }
     }
-    for (const a of attendance) {
+    const attendanceScoped = matric ? attendance.filter(a => (a[2] ?? '').toLowerCase() === matric) : attendance;
+    for (const a of attendanceScoped) {
       if (!a[7]) continue;
       if (department && (a[4] ?? '').toLowerCase() !== department) continue;
       if (courseCode && !(a[5] ?? '').toLowerCase().includes(courseCode)) continue;
@@ -114,7 +138,7 @@ Deno.serve(async (req) => {
 
     // consecutive absences per (matric, course) — >= 3
     const seq = new Map<string, { last: string; absents: number; max: number; date: string }>();
-    const sorted = [...attendance]
+    const sorted = [...attendanceScoped]
       .filter(a => !department || (a[4] ?? '').toLowerCase() === department)
       .filter(a => !courseCode || (a[5] ?? '').toLowerCase().includes(courseCode))
       .sort((x, y) => String(x[7] ?? '').localeCompare(String(y[7] ?? '')));
@@ -141,9 +165,9 @@ Deno.serve(async (req) => {
       consecutiveAbsencesDetail: consecutiveAbsences.slice(0, 50),
     };
 
-    return new Response(JSON.stringify({ ok: true, rows, summary }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    return jsonRes({ ok: true, rows, summary });
   } catch (e: any) {
     console.error('get-student-progress error:', e);
-    return new Response(JSON.stringify({ ok: false, error: e?.message || String(e) }), { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    return jsonRes({ ok: false, error: 'Failed to load progress' }, 500);
   }
 });

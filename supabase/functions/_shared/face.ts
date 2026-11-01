@@ -1,8 +1,23 @@
-// Shared face-comparison helper backed by Lovable AI (vision model).
+// Shared face-comparison helper backed by any OpenAI-compatible vision model.
 // Returns a 0-100 similarity confidence and a boolean verdict.
+//
+// Configure with Supabase secrets (works outside Lovable):
+//   FACE_API_URL  - chat-completions endpoint   (default: Lovable AI gateway)
+//   FACE_API_KEY  - API key                     (falls back to LOVABLE_API_KEY)
+//   FACE_MODEL    - vision-capable model id     (default below; verify it exists on your provider)
+// Example (OpenAI):  FACE_API_URL=https://api.openai.com/v1/chat/completions  FACE_MODEL=gpt-4o-mini
 
-const GATEWAY = 'https://ai.gateway.lovable.dev/v1/chat/completions';
-const MODEL = 'google/gemini-3.6-flash';
+const GATEWAY = Deno.env.get('FACE_API_URL') || 'https://ai.gateway.lovable.dev/v1/chat/completions';
+const MODEL = Deno.env.get('FACE_MODEL') || 'google/gemini-3.6-flash';
+
+function faceKey(): string | undefined {
+  return Deno.env.get('FACE_API_KEY') || Deno.env.get('LOVABLE_API_KEY') || undefined;
+}
+function faceHeaders(key: string): Record<string, string> {
+  const h: Record<string, string> = { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` };
+  if (GATEWAY.includes('lovable.dev')) h['Lovable-API-Key'] = key;
+  return h;
+}
 
 export interface FaceMatchResult {
   ok: boolean;
@@ -18,8 +33,8 @@ function asDataUrl(image: string): string {
 }
 
 export async function compareFaces(enrolled: string, selfie: string): Promise<FaceMatchResult> {
-  const key = Deno.env.get('LOVABLE_API_KEY');
-  if (!key) return { ok: false, same_person: false, confidence: 0, error: 'LOVABLE_API_KEY not configured' };
+  const key = faceKey();
+  if (!key) return { ok: false, same_person: false, confidence: 0, error: 'Face verification is not configured (set FACE_API_KEY)' };
 
   const prompt =
     'You are a face verification system. Image 1 is the enrolled reference photo of a student. ' +
@@ -29,11 +44,7 @@ export async function compareFaces(enrolled: string, selfie: string): Promise<Fa
 
   const resp = await fetch(GATEWAY, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${key}`,
-      'Lovable-API-Key': key,
-    },
+    headers: faceHeaders(key),
     body: JSON.stringify({
       model: MODEL,
       messages: [
@@ -50,10 +61,10 @@ export async function compareFaces(enrolled: string, selfie: string): Promise<Fa
   });
 
   if (!resp.ok) {
-    const text = await resp.text().catch(() => '');
+    await resp.text().catch(() => '');
     if (resp.status === 429) return { ok: false, same_person: false, confidence: 0, status: 429, error: 'Face check rate limited. Try again shortly.' };
     if (resp.status === 402) return { ok: false, same_person: false, confidence: 0, status: 402, error: 'AI credits exhausted. Ask an admin to top up.' };
-    return { ok: false, same_person: false, confidence: 0, status: resp.status, error: `Face check failed: ${text.slice(0, 200)}` };
+    return { ok: false, same_person: false, confidence: 0, status: resp.status, error: 'Face check failed. Try again.' };
   }
 
   const data = await resp.json().catch(() => ({}));
@@ -73,8 +84,8 @@ export interface FaceQualityResult { ok: boolean; acceptable: boolean; issues: s
 
 // Checks an enrollment photo: exactly one clear, well-lit, unobstructed, real face.
 export async function checkFaceQuality(image: string): Promise<FaceQualityResult> {
-  const key = Deno.env.get('LOVABLE_API_KEY');
-  if (!key) return { ok: false, acceptable: false, issues: [], error: 'LOVABLE_API_KEY not configured' };
+  const key = faceKey();
+  if (!key) return { ok: false, acceptable: false, issues: [], error: 'Face verification is not configured (set FACE_API_KEY)' };
   const prompt =
     'You check reference photos for a face-recognition attendance system. Judge this photo. It is acceptable ONLY if: ' +
     'exactly one human face is visible; the face is centered and fills a good part of the frame; lighting is good (not too dark, not washed out, no harsh shadow over the face); ' +
@@ -83,7 +94,7 @@ export async function checkFaceQuality(image: string): Promise<FaceQualityResult
     'Reply ONLY with compact JSON: {"acceptable": true|false, "issues": ["short plain-English tip for each problem"]}.';
   const resp = await fetch(GATEWAY, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}`, 'Lovable-API-Key': key },
+    headers: faceHeaders(key),
     body: JSON.stringify({
       model: MODEL,
       messages: [{ role: 'user', content: [
