@@ -49,6 +49,7 @@ import {
   Loader2,
   QrCode,
   KeyRound,
+  Smartphone,
   Copy,
   ShieldCheck,
 } from "lucide-react";
@@ -1609,6 +1610,37 @@ const DeptAdminDashboard = () => {
     }
   };
 
+  const [resettingDeviceId, setResettingDeviceId] = useState<string | null>(
+    null,
+  );
+  const resetSingleStudentDevice = async (
+    studentId: string,
+    studentName: string,
+  ) => {
+    if (
+      !confirm(
+        `Reset the device lock for ${studentName}? They can sign in again from a new phone, and their phone will be re-bound at the next scan.`,
+      )
+    )
+      return;
+    setResettingDeviceId(studentId);
+    try {
+      const { data, error } = await supabase.functions.invoke(
+        "provision-student-auth",
+        {
+          body: { action: "reset_device", student_id: studentId },
+        },
+      );
+      if (error || (data as any)?.error)
+        throw new Error((data as any)?.error || error?.message);
+      toast.success(`Device lock reset for ${studentName}.`);
+    } catch (e: any) {
+      toast.error(e.message ?? "Failed to reset device");
+    } finally {
+      setResettingDeviceId(null);
+    }
+  };
+
   if (initialLoading) {
     return <LoadingScreen message="Loading dashboard..." />;
   }
@@ -2378,6 +2410,24 @@ const DeptAdminDashboard = () => {
                                     <Loader2 className="w-4 h-4 animate-spin" />
                                   ) : (
                                     <KeyRound className="w-4 h-4" />
+                                  )}
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  title="Reset device lock (new phone)"
+                                  onClick={() =>
+                                    resetSingleStudentDevice(
+                                      student.id,
+                                      student.name,
+                                    )
+                                  }
+                                  disabled={resettingDeviceId === student.id}
+                                >
+                                  {resettingDeviceId === student.id ? (
+                                    <Loader2 className="w-4 h-4 animate-spin" />
+                                  ) : (
+                                    <Smartphone className="w-4 h-4" />
                                   )}
                                 </Button>
                                 <Button
