@@ -32,6 +32,20 @@ function matricToEmail(matric: string) {
   return `${clean}@${SYNTHETIC_DOMAIN}`;
 }
 
+async function resetStudentPassword(
+  admin: any,
+  studentId: string,
+  actorUserId: string,
+  password: string,
+) {
+  const { error } = await admin.rpc('admin_reset_student_password', {
+    _student_id: studentId,
+    _actor_user_id: actorUserId,
+    _password: password,
+  });
+  if (error) throw error;
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
 
@@ -106,12 +120,10 @@ Deno.serve(async (req) => {
         const patch: Record<string, unknown> = { first_login_at: null };
         if (action === 'reset_device' || full) patch.device_fingerprint = null;
         if (full) patch.face_url = null;
-        await admin.from('students').update(patch).eq('id', s.id);
+        const { error: patchError } = await admin.from('students').update(patch).eq('id', s.id);
+        if (patchError) throw patchError;
         if (full && authUserId) {
-          await admin.auth.admin.updateUserById(authUserId, {
-            password,
-            user_metadata: { name: s.name, matric_no: s.matric_no, is_student: true, must_change_password: true },
-          });
+          await resetStudentPassword(admin, s.id, user.id, password);
         }
         await admin.from('student_login_events').insert({
           student_id: s.id,
@@ -143,10 +155,7 @@ Deno.serve(async (req) => {
       }
 
       if (action === 'reset_password' && authUserId) {
-        await admin.auth.admin.updateUserById(authUserId, {
-          password,
-          user_metadata: { name: s.name, matric_no: s.matric_no, is_student: true, must_change_password: true },
-        });
+        await resetStudentPassword(admin, s.id, user.id, password);
         results.push({ id: s.id, name: s.name, matric_no: s.matric_no, email, status: 'password_reset', temp_password: password });
         continue;
       }
@@ -158,18 +167,20 @@ Deno.serve(async (req) => {
         email,
         password,
         email_confirm: true,
-        user_metadata: { name: s.name, matric_no: s.matric_no, is_student: true, must_change_password: true },
+        user_metadata: { name: s.name, matric_no: s.matric_no, is_student: true },
       });
 
+      let existingAuthUser = false;
       if (createErr) {
         // If user exists, look it up by email (paginated)
         const found = await findUserByEmail(admin, email);
         if (found) {
           authUserId = found.id;
-          await admin.auth.admin.updateUserById(found.id, {
-            password,
-            user_metadata: { name: s.name, matric_no: s.matric_no, is_student: true, must_change_password: true },
+          existingAuthUser = true;
+          const { error: metadataError } = await admin.auth.admin.updateUserById(found.id, {
+            user_metadata: { name: s.name, matric_no: s.matric_no, is_student: true },
           });
+          if (metadataError) throw metadataError;
         } else {
           results.push({ id: s.id, name: s.name, matric_no: s.matric_no, error: createErr.message });
           continue;
@@ -179,14 +190,26 @@ Deno.serve(async (req) => {
       }
 
       // Link in students + profiles + roles
-      await admin.from('students').update({ auth_user_id: authUserId }).eq('id', s.id);
-      await admin.from('profiles').upsert({
+      const { error: linkError } = await admin.from('students').update({ auth_user_id: authUserId }).eq('id', s.id);
+      if (linkError) throw linkError;
+      if (existingAuthUser) {
+        await resetStudentPassword(admin, s.id, user.id, password);
+      }
+      const { error: controlError } = await admin.from('student_password_controls').upsert({
+        user_id: authUserId!,
+        must_change_password: true,
+      }, { onConflict: 'user_id' });
+      if (controlError) throw controlError;
+
+      const { error: profileError } = await admin.from('profiles').upsert({
         user_id: authUserId,
         name: s.name,
         email,
         department_id: s.department_id,
       }, { onConflict: 'user_id' });
-      await admin.from('user_roles').upsert({ user_id: authUserId, role: 'student' }, { onConflict: 'user_id,role' });
+      if (profileError) throw profileError;
+      const { error: roleError } = await admin.from('user_roles').upsert({ user_id: authUserId, role: 'student' }, { onConflict: 'user_id,role' });
+      if (roleError) throw roleError;
 
       results.push({ id: s.id, name: s.name, matric_no: s.matric_no, email, status: 'created', temp_password: password });
     }

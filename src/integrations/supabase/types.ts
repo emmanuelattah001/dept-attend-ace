@@ -547,6 +547,24 @@ export type Database = {
           },
         ]
       }
+      student_password_controls: {
+        Row: {
+          must_change_password: boolean
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          must_change_password?: boolean
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          must_change_password?: boolean
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       user_roles: {
         Row: {
           id: string
@@ -638,6 +656,10 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      admin_reset_student_password: {
+        Args: { _actor_user_id: string; _password: string; _student_id: string }
+        Returns: undefined
+      }
       claim_student_login: { Args: never; Returns: Json }
       get_attendance_by_matric: {
         Args: { _matric_no: string }
@@ -656,6 +678,10 @@ export type Database = {
         Returns: boolean
       }
       is_dept_staff: { Args: { _user_id: string }; Returns: boolean }
+      student_change_initial_password: {
+        Args: { _password: string }
+        Returns: undefined
+      }
     }
     Enums: {
       app_role:
