@@ -33,14 +33,19 @@ Deno.serve(async (req) => {
     const { data: { user }, error: userErr } = await userClient.auth.getUser();
     if (userErr || !user) return new Response(JSON.stringify({ error: 'Auth invalid' }), { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
 
-    // Check caller role
+    // Check caller role — staff hosting/managing a department may provision logins
     const { data: roles } = await admin.from('user_roles').select('role').eq('user_id', user.id);
-    const isAdmin = roles?.some((r: any) => r.role === 'dept_admin' || r.role === 'super_admin');
+    const isAdmin = roles?.some((r: any) =>
+      ['dept_admin', 'super_admin', 'lecturer', 'course_rep'].includes(r.role),
+    );
     if (!isAdmin) return new Response(JSON.stringify({ error: 'Forbidden' }), { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
 
     const { data: callerProfile } = await admin.from('profiles').select('department_id').eq('user_id', user.id).maybeSingle();
     const isSuper = roles?.some((r: any) => r.role === 'super_admin');
     const callerDept = callerProfile?.department_id;
+    if (!isSuper && !callerDept) {
+      return new Response(JSON.stringify({ error: 'Your account is not linked to a department. Ask an admin to set your department first.' }), { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    }
 
     const body = await req.json().catch(() => ({}));
     const { student_id, action = 'provision' } = body as { student_id?: string; action?: string };
@@ -74,6 +79,20 @@ Deno.serve(async (req) => {
           actor_user_id: user.id,
         });
         results.push({ id: s.id, name: s.name, matric_no: s.matric_no, status: 'login_reset' });
+        continue;
+      }
+
+      if (action === 'reset_device') {
+        await admin.from('students').update({ device_fingerprint: null }).eq('id', s.id);
+        await admin.from('student_login_events').insert({
+          student_id: s.id,
+          department_id: s.department_id,
+          matric_no: s.matric_no,
+          event: 'device_reset',
+          actor_user_id: user.id,
+          detail: { reason: 'admin reset device binding' },
+        });
+        results.push({ id: s.id, name: s.name, matric_no: s.matric_no, status: 'device_reset' });
         continue;
       }
 
