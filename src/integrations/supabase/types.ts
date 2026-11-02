@@ -381,6 +381,38 @@ export type Database = {
           },
         ]
       }
+      institution_integrations: {
+        Row: {
+          configured_by: string
+          created_at: string
+          google_sheet_id: string
+          institution_id: string
+          updated_at: string
+        }
+        Insert: {
+          configured_by: string
+          created_at?: string
+          google_sheet_id: string
+          institution_id: string
+          updated_at?: string
+        }
+        Update: {
+          configured_by?: string
+          created_at?: string
+          google_sheet_id?: string
+          institution_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "institution_integrations_institution_id_fkey"
+            columns: ["institution_id"]
+            isOneToOne: true
+            referencedRelation: "institutions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       institutions: {
         Row: {
           created_at: string
@@ -497,6 +529,24 @@ export type Database = {
           },
         ]
       }
+      student_password_controls: {
+        Row: {
+          must_change_password: boolean
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          must_change_password?: boolean
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          must_change_password?: boolean
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       students: {
         Row: {
           auth_user_id: string | null
@@ -546,24 +596,6 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
-      }
-      student_password_controls: {
-        Row: {
-          must_change_password: boolean
-          updated_at: string
-          user_id: string
-        }
-        Insert: {
-          must_change_password?: boolean
-          updated_at?: string
-          user_id: string
-        }
-        Update: {
-          must_change_password?: boolean
-          updated_at?: string
-          user_id?: string
-        }
-        Relationships: []
       }
       user_roles: {
         Row: {
@@ -661,6 +693,7 @@ export type Database = {
         Returns: undefined
       }
       claim_student_login: { Args: never; Returns: Json }
+      current_user_institution: { Args: never; Returns: string }
       get_attendance_by_matric: {
         Args: { _matric_no: string }
         Returns: {
@@ -677,8 +710,15 @@ export type Database = {
           status: Database["public"]["Enums"]["attendance_status"]
         }[]
       }
-      current_user_institution: { Args: never; Returns: string }
       get_user_department: { Args: { _user_id: string }; Returns: string }
+      has_course_staff_assignment: {
+        Args: { _course_id: string; _staff_role: string; _user_id: string }
+        Returns: boolean
+      }
+      has_course_student_attendance: {
+        Args: { _student_id: string; _user_id: string }
+        Returns: boolean
+      }
       has_role: {
         Args: {
           _role: Database["public"]["Enums"]["app_role"]
@@ -687,9 +727,13 @@ export type Database = {
         Returns: boolean
       }
       is_dept_staff: { Args: { _user_id: string }; Returns: boolean }
+      is_student_auth_user: { Args: { _user_id: string }; Returns: boolean }
       list_attendance_institutions: {
         Args: never
-        Returns: { id: string; name: string }[]
+        Returns: {
+          id: string
+          name: string
+        }[]
       }
       set_course_staff_assignment: {
         Args: {
