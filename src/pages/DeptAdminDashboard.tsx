@@ -2770,13 +2770,6 @@ const DeptAdminDashboard = () => {
                   ) : (
                     <RefreshCw className="w-4 h-4 mr-1" />
                   )}
-
-                  {activeTab === "staff" && role === "dept_admin" && (
-                    <CourseStaffManager
-                      departmentId={profile.department_id}
-                      courses={courses}
-                    />
-                  )}
                   Refresh
                 </Button>
               </div>
