@@ -2901,6 +2901,13 @@ const DeptAdminDashboard = () => {
             </CardContent>
           </Card>
         )}
+
+        {activeTab === "staff" && role === "dept_admin" && (
+          <CourseStaffManager
+            departmentId={profile.department_id}
+            courses={courses}
+          />
+        )}
       </div>
     </DashboardLayout>
   );
