@@ -53,7 +53,7 @@ const AuthPage = () => {
       }
 
       toast.success('Logged in');
-      navigate(nextPath);
+      navigate(nextPath, { state: { homeRolePreference: 'student' } });
     } catch (err: any) {
       toast.error(err.message || 'Login failed. Ask your course rep to create your login.');
     } finally {
@@ -69,7 +69,9 @@ const AuthPage = () => {
         const { error } = await supabase.auth.signInWithPassword({ email, password });
         if (error) throw error;
         toast.success('Logged in successfully');
-        navigate(nextPath);
+        navigate(nextPath, {
+          state: { homeRolePreference: mode === 'lecturer' ? 'lecturer' : 'admin' },
+        });
       } else {
         const { error } = await supabase.auth.signUp({
           email, password,

@@ -1,6 +1,8 @@
 import { Suspense, lazy, useState } from 'react';
 import { useAuth } from '@/hooks/useAuth';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
+import type { AppRole } from '@/hooks/useAuth';
+import { resolveHomeRole, type HomeRolePreference } from '@/lib/home-routing';
 import { Button } from '@/components/ui/button';
 import {
   ArrowRight,
@@ -412,17 +414,20 @@ const LandingPage = () => {
 };
 
 const Index = () => {
-  const { session, role, hierarchyScope, loading } = useAuth();
+  const { session, role, roles, hierarchyScope, loading } = useAuth();
+  const location = useLocation();
+  const locationState = location.state as { homeRolePreference?: HomeRolePreference | null } | null;
+  const dashboardRole = resolveHomeRole(role, roles, locationState?.homeRolePreference ?? null);
 
   if (loading) {
     return <LoadingScreen />;
   }
 
   if (!session) return <LandingPage />;
-  if (role !== 'super_admin' && hierarchyScope) return <HierarchyDashboard />;
+  if (dashboardRole !== 'super_admin' && hierarchyScope) return <HierarchyDashboard />;
 
   const dashboard = (() => {
-    switch (role) {
+    switch (dashboardRole as AppRole | null) {
       case 'super_admin':
         return <SuperAdminDashboard />;
       case 'dept_admin':

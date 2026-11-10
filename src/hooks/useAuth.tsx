@@ -3,7 +3,7 @@ import { Session, User } from '@supabase/supabase-js';
 import { supabase } from '@/integrations/supabase/client';
 import type { HierarchyScope } from '@/lib/hierarchy';
 
-type AppRole = 'super_admin' | 'dept_admin' | 'student' | 'lecturer' | 'course_rep' | 'hod';
+export type AppRole = 'super_admin' | 'dept_admin' | 'student' | 'lecturer' | 'course_rep' | 'hod';
 
 interface Profile {
   id: string;
@@ -18,6 +18,7 @@ interface AuthContextType {
   user: User | null;
   profile: Profile | null;
   role: AppRole | null;
+  roles: AppRole[];
   hierarchyScope: HierarchyScope | null;
   loading: boolean;
   signOut: () => Promise<void>;
@@ -28,6 +29,7 @@ const AuthContext = createContext<AuthContextType>({
   user: null,
   profile: null,
   role: null,
+  roles: [],
   hierarchyScope: null,
   loading: true,
   signOut: async () => {},
@@ -38,6 +40,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [role, setRole] = useState<AppRole | null>(null);
+  const [roles, setRoles] = useState<AppRole[]>([]);
   const [hierarchyScope, setHierarchyScope] = useState<HierarchyScope | null>(null);
   const [loading, setLoading] = useState(true);
   const requestVersion = useRef(0);
@@ -56,11 +59,12 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       'super_admin',
       'dept_admin',
       'hod',
-      'lecturer',
       'course_rep',
       'student',
+      'lecturer',
     ];
     const roles = (roleRes.data ?? []).map((row) => row.role as AppRole);
+    setRoles(roles);
     setRole(rolePriority.find((candidate) => roles.includes(candidate)) ?? null);
     const scope = scopeRes.data;
     setHierarchyScope(scope && (scope.role === 'institution_admin' || scope.role === 'faculty_admin') ? { ...scope, role: scope.role } : null);
@@ -79,6 +83,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
           requestVersion.current++;
           setProfile(null);
           setRole(null);
+          setRoles([]);
           setHierarchyScope(null);
           setLoading(false);
         }
@@ -102,11 +107,12 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     await supabase.auth.signOut();
     setProfile(null);
     setRole(null);
+    setRoles([]);
     setHierarchyScope(null);
   };
 
   return (
-    <AuthContext.Provider value={{ session, user, profile, role, hierarchyScope, loading, signOut }}>
+    <AuthContext.Provider value={{ session, user, profile, role, roles, hierarchyScope, loading, signOut }}>
       {children}
     </AuthContext.Provider>
   );
