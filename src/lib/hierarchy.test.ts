@@ -25,4 +25,15 @@ describe('hierarchy boundaries', () => {
     expect(hierarchyPermissions(true, null, 'university-b').manageInstitutions).toBe(true);
     expect(hierarchyPermissions(true, null, 'university-b').assignAdministrators).toBe(true);
   });
+  it('academic periods are visible within scope and editable only by institution or platform admins', () => {
+    expect(hierarchyPermissions(false, faculty, 'university-a').viewAcademicPeriods).toBe(true);
+    expect(hierarchyPermissions(false, faculty, 'university-a').manageAcademicPeriods).toBe(false);
+    expect(hierarchyPermissions(false, institution, 'university-a').manageAcademicPeriods).toBe(true);
+    expect(hierarchyPermissions(false, institution, 'university-b').viewAcademicPeriods).toBe(false);
+  });
+  it('institution administrators may invite only faculty administrators in their own institution', () => {
+    expect(hierarchyPermissions(false, institution, 'university-a').inviteFacultyAdmins).toBe(true);
+    expect(hierarchyPermissions(false, institution, 'university-a').inviteInstitutionAdmins).toBe(false);
+    expect(hierarchyPermissions(false, institution, 'university-b').inviteFacultyAdmins).toBe(false);
+  });
 });

@@ -747,6 +747,15 @@ export type Database = {
         Returns: undefined
       }
       claim_student_login: { Args: never; Returns: Json }
+      complete_hierarchy_invitation: {
+        Args: {
+          _faculty_id?: string
+          _institution_id: string
+          _role: string
+          _user_id: string
+        }
+        Returns: undefined
+      }
       current_user_institution: { Args: never; Returns: string }
       get_attendance_by_matric: {
         Args: { _matric_no: string }

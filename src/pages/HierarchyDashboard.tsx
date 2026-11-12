@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { FormEvent, useCallback, useEffect, useState } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import type { Tables } from '@/integrations/supabase/types';
 import { useAuth } from '@/hooks/useAuth';
@@ -9,7 +9,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Building2, GraduationCap, Plus, RefreshCw, ShieldCheck } from 'lucide-react';
+import { Building2, CalendarDays, GraduationCap, MailPlus, Plus, RefreshCw, ShieldCheck } from 'lucide-react';
 import { toast } from 'sonner';
 
 export function HierarchyManager() {
@@ -19,6 +19,7 @@ export function HierarchyManager() {
   const [faculties, setFaculties] = useState<Tables<'faculties'>[]>([]);
   const [departments, setDepartments] = useState<Tables<'departments'>[]>([]);
   const [memberships, setMemberships] = useState<Tables<'hierarchy_memberships'>[]>([]);
+  const [academicPeriods, setAcademicPeriods] = useState<Tables<'academic_periods'>[]>([]);
   const [profiles, setProfiles] = useState<{ user_id: string; name: string; department_id: string | null }[]>([]);
   const [institutionId, setInstitutionId] = useState(hierarchyScope?.institution_id ?? '');
   const [facultyId, setFacultyId] = useState(hierarchyScope?.faculty_id ?? '');
@@ -28,6 +29,13 @@ export function HierarchyManager() {
   const [departmentToMove, setDepartmentToMove] = useState('');
   const [userId, setUserId] = useState('');
   const [adminRole, setAdminRole] = useState<'institution_admin' | 'faculty_admin'>('institution_admin');
+  const [periodType, setPeriodType] = useState<'academic_year' | 'semester' | 'term'>('academic_year');
+  const [periodName, setPeriodName] = useState('');
+  const [periodStart, setPeriodStart] = useState('');
+  const [periodEnd, setPeriodEnd] = useState('');
+  const [parentPeriodId, setParentPeriodId] = useState('');
+  const [inviteEmail, setInviteEmail] = useState('');
+  const [inviteRole, setInviteRole] = useState<'institution_admin' | 'faculty_admin'>('faculty_admin');
   const [busy, setBusy] = useState(false);
   const [loadError, setLoadError] = useState('');
 
@@ -51,6 +59,18 @@ export function HierarchyManager() {
   }, [platform]);
   useEffect(() => { void load().catch(error => setLoadError(String(error))); }, [load]);
 
+  useEffect(() => {
+    let cancelled = false;
+    if (!institutionId) { setAcademicPeriods([]); return; }
+    supabase.from('academic_periods').select('*').eq('institution_id', institutionId).order('starts_on', { ascending: false })
+      .then(({ data, error }) => {
+        if (cancelled) return;
+        if (error) setLoadError(error.message);
+        else setAcademicPeriods(data ?? []);
+      });
+    return () => { cancelled = true; };
+  }, [institutionId]);
+
   const institution = institutions.find(i => i.id === institutionId);
   const assignableProfiles = profiles.filter(profile => {
     if (!profile.department_id) return true;
@@ -59,6 +79,7 @@ export function HierarchyManager() {
     return profileFaculty?.institution_id === institutionId;
   });
   const permissions = hierarchyPermissions(platform, hierarchyScope, institutionId, facultyId, institution?.status === 'active');
+  const parentPeriods = academicPeriods.filter(period => period.period_type === 'academic_year');
   const visibleFaculties = faculties.filter(f => f.institution_id === institutionId);
   const visibleDepartments = departments.filter(d => d.faculty_id && visibleFaculties.some(f => f.id === d.faculty_id) && (!facultyId || d.faculty_id === facultyId));
   const run = async (action: () => Promise<void>, message: string) => {
@@ -68,6 +89,39 @@ export function HierarchyManager() {
     finally { setBusy(false); }
   };
   const selectInstitution = (id: string) => { setInstitutionId(id); setFacultyId(''); };
+  const createAcademicPeriod = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!institutionId || (periodType !== 'academic_year' && !parentPeriodId)) return;
+    void run(async () => {
+      const { error } = await supabase.from('academic_periods').insert({
+        institution_id: institutionId,
+        parent_period_id: periodType === 'academic_year' ? null : parentPeriodId,
+        period_type: periodType,
+        name: periodName.trim(),
+        starts_on: periodStart,
+        ends_on: periodEnd,
+      });
+      if (error) throw error;
+      setPeriodName(''); setPeriodStart(''); setPeriodEnd(''); setParentPeriodId('');
+    }, 'Academic period created');
+  };
+  const sendAdministratorInvite = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!institutionId) return;
+    void run(async () => {
+      const { data, error } = await supabase.functions.invoke('invite-hierarchy-admin', {
+        body: {
+          email: inviteEmail.trim(),
+          institution_id: institutionId,
+          role: inviteRole,
+          faculty_id: inviteRole === 'faculty_admin' ? facultyId || null : null,
+        },
+      });
+      if (error) throw error;
+      if (data?.error) throw new Error(data.error);
+      setInviteEmail('');
+    }, 'Administrator invitation sent');
+  };
 
   return <div className="space-y-6">
     <div className="flex flex-wrap items-center justify-between gap-3">
@@ -93,6 +147,25 @@ export function HierarchyManager() {
     </div>
     {institution && <div className="flex flex-wrap justify-between items-center gap-3 border-b pb-4"><h3 className="font-semibold flex gap-2 items-center"><Building2 className="h-5 w-5 text-primary" />{institution.name}</h3>{platform ? <Select value={institution.status} onValueChange={status => void run(async () => { const { error } = await supabase.from('institutions').update({ status }).eq('id', institution.id); if (error) throw error; }, 'Institution status updated')} disabled={busy}><SelectTrigger className="w-40"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="active">Active</SelectItem><SelectItem value="suspended">Suspended</SelectItem><SelectItem value="inactive">Inactive</SelectItem></SelectContent></Select> : <span className="text-sm text-muted-foreground">{institution.status}</span>}</div>}
     {institution && (platform || hierarchyScope?.role === 'institution_admin') && <section className="flex flex-wrap items-center justify-between gap-3 rounded-lg border p-4"><div><h3 className="font-semibold">Institution attendance archive</h3><p className="text-sm text-muted-foreground">Configure a separate Google Sheet for this institution.</p></div><SheetsSettingsDialog institutionId={institution.id} /></section>}
+    {institution && permissions.viewAcademicPeriods && <section className="space-y-4 border-y py-5">
+      <div className="flex items-center gap-2"><CalendarDays className="h-5 w-5 text-primary" /><h3 className="text-lg font-semibold">Academic years and terms</h3></div>
+      {permissions.manageAcademicPeriods && <form className="grid gap-3 sm:grid-cols-2 lg:grid-cols-6" onSubmit={createAcademicPeriod}>
+        <div className="space-y-2 lg:col-span-1"><Label>Period</Label><Select value={periodType} onValueChange={value => { const next = value as typeof periodType; setPeriodType(next); setParentPeriodId(''); }}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="academic_year">Academic year</SelectItem><SelectItem value="semester">Semester</SelectItem><SelectItem value="term">Term</SelectItem></SelectContent></Select></div>
+        {periodType !== 'academic_year' && <div className="space-y-2 lg:col-span-1"><Label>Academic year</Label><Select value={parentPeriodId} onValueChange={setParentPeriodId}><SelectTrigger><SelectValue placeholder="Choose year" /></SelectTrigger><SelectContent>{parentPeriods.map(period => <SelectItem key={period.id} value={period.id}>{period.name}</SelectItem>)}</SelectContent></Select></div>}
+        <div className="space-y-2 lg:col-span-1"><Label htmlFor="academic-period-name">Name</Label><Input id="academic-period-name" value={periodName} onChange={event => setPeriodName(event.target.value)} maxLength={120} placeholder={periodType === 'academic_year' ? '2026/2027' : 'First semester'} required /></div>
+        <div className="space-y-2 lg:col-span-1"><Label htmlFor="academic-period-start">Starts</Label><Input id="academic-period-start" type="date" value={periodStart} onChange={event => setPeriodStart(event.target.value)} required /></div>
+        <div className="space-y-2 lg:col-span-1"><Label htmlFor="academic-period-end">Ends</Label><Input id="academic-period-end" type="date" value={periodEnd} onChange={event => setPeriodEnd(event.target.value)} required /></div>
+        <div className="flex items-end"><Button className="w-full" disabled={busy || !periodName.trim() || !periodStart || !periodEnd || (periodType !== 'academic_year' && !parentPeriodId)}><Plus />Add period</Button></div>
+      </form>}
+      <div className="divide-y">{academicPeriods.map(period => <div className="flex flex-wrap items-center justify-between gap-2 py-3" key={period.id}><div><p className="font-medium">{period.name}</p><p className="text-sm text-muted-foreground">{period.period_type.replace('_', ' ')}{period.parent_period_id ? ` · ${parentPeriods.find(parent => parent.id === period.parent_period_id)?.name ?? ''}` : ''}</p></div><span className="text-sm text-muted-foreground">{period.starts_on} – {period.ends_on}</span></div>)}</div>
+      {academicPeriods.length === 0 && <p className="text-sm text-muted-foreground">No academic periods have been added.</p>}
+    </section>}
+    {institution && (permissions.inviteInstitutionAdmins || permissions.inviteFacultyAdmins) && <section className="space-y-3 border-b pb-5"><h3 className="flex items-center gap-2 text-lg font-semibold"><MailPlus className="h-5 w-5 text-primary" />Invite an administrator</h3><p className="text-sm text-muted-foreground">An invitation will be sent to their email. Their access will be limited to the selected institution and faculty.</p><form className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4" onSubmit={sendAdministratorInvite}>
+      <div className="space-y-2"><Label htmlFor="administrator-email">Email address</Label><Input id="administrator-email" type="email" autoComplete="email" maxLength={254} required value={inviteEmail} onChange={event => setInviteEmail(event.target.value)} placeholder="name@university.edu" /></div>
+      <div className="space-y-2"><Label>Administrator role</Label><Select value={inviteRole} onValueChange={value => setInviteRole(value as typeof inviteRole)}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{permissions.inviteInstitutionAdmins && <SelectItem value="institution_admin">Institution Admin</SelectItem>}{permissions.inviteFacultyAdmins && <SelectItem value="faculty_admin">Faculty Admin</SelectItem>}</SelectContent></Select></div>
+      {inviteRole === 'faculty_admin' && <div className="space-y-2"><Label>Faculty</Label><Select value={facultyId} onValueChange={setFacultyId}><SelectTrigger><SelectValue placeholder="Choose faculty" /></SelectTrigger><SelectContent>{visibleFaculties.map(faculty => <SelectItem key={faculty.id} value={faculty.id}>{faculty.name}</SelectItem>)}</SelectContent></Select></div>}
+      <div className="flex items-end"><Button className="w-full" disabled={busy || !inviteEmail.trim() || (inviteRole === 'faculty_admin' && !facultyId)}><MailPlus />Send invitation</Button></div>
+    </form></section>}
     {!institution && !loadError && <p className="text-muted-foreground">No institution assigned.</p>}
     {permissions.manageFaculties && institutionId && <form className="flex flex-wrap gap-2" onSubmit={e => { e.preventDefault(); void run(async () => { const { data, error } = await supabase.from('faculties').insert({ name: facultyName.trim(), institution_id: institutionId }).select().single(); if (error) throw error; setFacultyName(''); setFacultyId(data.id); }, 'Faculty created'); }}><Input aria-label="Faculty name" placeholder="Faculty name" required maxLength={200} value={facultyName} onChange={e => setFacultyName(e.target.value)} className="flex-1 min-w-48" /><Button disabled={busy || !facultyName.trim()}><Plus />Add Faculty</Button></form>}
     <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{visibleFaculties.filter(f => !facultyId || f.id === facultyId).map(f => <div key={f.id} className="rounded-md border p-4 space-y-2"><GraduationCap className="h-5 w-5 text-accent" /><h3 className="font-semibold break-words">{f.name}</h3><p className="text-sm text-muted-foreground">{departments.filter(d => d.faculty_id === f.id).length} departments</p><Button variant="link" className="p-0" onClick={() => setFacultyId(f.id)}>View departments</Button></div>)}</div>
