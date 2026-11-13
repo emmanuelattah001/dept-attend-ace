@@ -64,10 +64,16 @@ Deno.serve(async (req) => {
     const caller = await getCaller(req, adminDb);
     const isStaff = hasAnyRole(caller, STAFF_ROLES);
     const isSuper = caller.isService || caller.roles.includes('super_admin');
+    const isInstitutionAdmin = !isSuper && caller.hierarchyRole === 'institution_admin';
     let verifiedStudentInstitutionId: string | null = null;
     let allowedCourseCodes: string[] | null = null;
+    let allowedDepartmentNames: Set<string> | null = null;
 
-    if (!isStaff) {
+    if (caller.hierarchyRole === 'faculty_admin') {
+      return jsonRes({ ok: false, error: 'Faculty administrators do not have access to the institution-wide archive.' }, 403);
+    }
+
+    if (!isStaff && !isInstitutionAdmin) {
       if (!caller.userId) return jsonRes({ ok: false, error: 'Sign in with your student account to view attendance.' }, 401);
       if (rateLimited(`prog:${clientIp(req)}`, 30)) return jsonRes({ ok: false, error: 'Too many requests' }, 429);
       if (!matric || matric.length < 4) return jsonRes({ ok: false, error: 'matric_no required' }, 400);
@@ -93,6 +99,21 @@ Deno.serve(async (req) => {
       verifiedStudentInstitutionId = studentFaculty?.institution_id ?? null;
       if (!verifiedStudentInstitutionId) return jsonRes({ ok: false, error: 'Your student account is not linked to an institution.' }, 403);
       department = '';
+    } else if (isInstitutionAdmin) {
+      if (!caller.institutionId) return jsonRes({ ok: false, error: 'No institution assigned' }, 403);
+      const { data: institutionFaculties, error: institutionFacultiesError } = await adminDb
+        .from('faculties').select('id').eq('institution_id', caller.institutionId);
+      if (institutionFacultiesError) throw institutionFacultiesError;
+      let facultyIds = (institutionFaculties ?? []).map((faculty) => faculty.id);
+      if (caller.hierarchyRole === 'faculty_admin') {
+        if (!caller.facultyId || !facultyIds.includes(caller.facultyId)) return jsonRes({ ok: false, error: 'No faculty access' }, 403);
+        facultyIds = [caller.facultyId];
+      }
+      const { data: scopedDepartments, error: scopedDepartmentsError } = facultyIds.length
+        ? await adminDb.from('departments').select('name').in('faculty_id', facultyIds)
+        : { data: [], error: null };
+      if (scopedDepartmentsError) throw scopedDepartmentsError;
+      allowedDepartmentNames = new Set((scopedDepartments ?? []).map((entry) => entry.name.trim().toLowerCase()));
     } else if (!isSuper) {
       // staff are locked to their own department
       if (!caller.departmentId) return jsonRes({ ok: false, error: 'No department assigned' }, 403);
@@ -127,7 +148,7 @@ Deno.serve(async (req) => {
     }
 
     let institutionId = caller.institutionId;
-    if (!isStaff && verifiedStudentInstitutionId) {
+    if (!isStaff && !isInstitutionAdmin && verifiedStudentInstitutionId) {
       institutionId = verifiedStudentInstitutionId;
       if (body.institution_id && body.institution_id !== institutionId) {
         return jsonRes({ ok: false, error: 'You can only access your own institution’s archive' }, 403);
@@ -188,6 +209,7 @@ Deno.serve(async (req) => {
       last_status: r[9] ?? '',
     }));
     if (matric) rows = rows.filter(r => r.matric_no.toLowerCase() === matric);
+    if (allowedDepartmentNames) rows = rows.filter(r => allowedDepartmentNames?.has(r.department.toLowerCase()) ?? false);
     if (courseCode) rows = rows.filter(r => {
       const archivedCourse = r.course.toLowerCase();
       return archivedCourse === courseCode || archivedCourse.startsWith(`${courseCode} -`);
@@ -212,7 +234,8 @@ Deno.serve(async (req) => {
         if (r.attendance_percentage >= 75) above75++; else below75++;
       }
     }
-    const attendanceScoped = matric ? attendance.filter(a => (a[2] ?? '').toLowerCase() === matric) : attendance;
+    let attendanceScoped = matric ? attendance.filter(a => (a[2] ?? '').toLowerCase() === matric) : attendance;
+    if (allowedDepartmentNames) attendanceScoped = attendanceScoped.filter(a => allowedDepartmentNames?.has((a[4] ?? '').toLowerCase()) ?? false);
     for (const a of attendanceScoped) {
       if (!a[7]) continue;
       if (department && (a[4] ?? '').toLowerCase() !== department) continue;

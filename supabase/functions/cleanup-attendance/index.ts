@@ -5,6 +5,7 @@
 // for the pg_cron snippet that schedules it.
 import { corsHeaders } from 'npm:@supabase/supabase-js@2/cors';
 import { getCaller, makeAdminClient } from '../_shared/auth.ts';
+import { departmentsEligibleForCleanup } from '../_shared/cleanup-eligibility.ts';
 
 const json = (b: unknown, status = 200) =>
   new Response(JSON.stringify(b), { status, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
@@ -31,8 +32,12 @@ Deno.serve(async (req) => {
     if (institutionError) throw institutionError;
     if (integrationError) throw integrationError;
     const configuredInstitutions = new Set((integrations ?? []).map((integration) => integration.institution_id));
+    const activeConfiguredInstitutionIds = (activeInstitutions ?? [])
+      .map((institution) => institution.id)
+      .filter((institutionId) => configuredInstitutions.has(institutionId));
     const syncUrl = `${Deno.env.get('SUPABASE_URL')}/functions/v1/sheets-sync`;
-    for (const { id: institutionId } of (activeInstitutions ?? []).filter((institution) => configuredInstitutions.has(institution.id))) {
+    const successfulSyncInstitutionIds = new Set<string>();
+    for (const institutionId of activeConfiguredInstitutionIds) {
       const syncResp = await fetch(syncUrl, {
         method: 'POST',
         headers: {
@@ -40,13 +45,40 @@ Deno.serve(async (req) => {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({ action: 'sync_unsynced', institution_id: institutionId }),
-      }).catch((e) => ({ ok: false, status: 0, text: async () => String(e) }) as any);
-      if (!syncResp.ok) console.log('pre-cleanup institution sync failed; retaining unsynced rows:', syncResp.status);
+      }).catch((e) => {
+        console.log('pre-cleanup institution sync failed; retaining rows:', String(e));
+        return null;
+      });
+      if (syncResp?.ok) successfulSyncInstitutionIds.add(institutionId);
+      else console.log('pre-cleanup institution sync failed; retaining rows:', syncResp?.status ?? 'network error');
     }
+
+    const syncedInstitutionIds = activeConfiguredInstitutionIds
+      .filter((institutionId) => successfulSyncInstitutionIds.has(institutionId));
+    const { data: faculties, error: facultyError } = syncedInstitutionIds.length
+      ? await admin.from('faculties').select('id, institution_id').in('institution_id', syncedInstitutionIds)
+      : { data: [], error: null };
+    if (facultyError) throw facultyError;
+    const facultyIds = (faculties ?? []).map((faculty) => faculty.id);
+    const { data: departments, error: departmentError } = facultyIds.length
+      ? await admin.from('departments').select('id, faculty_id').in('faculty_id', facultyIds)
+      : { data: [], error: null };
+    if (departmentError) throw departmentError;
+    const institutionByFaculty = new Map((faculties ?? []).map((faculty) => [faculty.id, faculty.institution_id]));
+    const eligibleDepartmentIds = departmentsEligibleForCleanup(
+      activeConfiguredInstitutionIds,
+      successfulSyncInstitutionIds,
+      (departments ?? []).flatMap((department) => {
+        const institutionId = institutionByFaculty.get(department.faculty_id);
+        return institutionId ? [{ institutionId, departmentId: department.id }] : [];
+      }),
+    );
+    if (!eligibleDepartmentIds.length) return json({ ok: true, deleted: 0, cutoff, message: 'No institution archive completed a successful sync; attendance was retained.' });
 
     const { data, error } = await admin
       .from('attendance')
       .delete()
+      .in('department_id', eligibleDepartmentIds)
       .lt('created_at', cutoff)
       .eq('synced_to_sheets', true)
       .select('id');

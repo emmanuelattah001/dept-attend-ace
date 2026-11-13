@@ -190,6 +190,7 @@ Deno.serve(async (req) => {
     const caller = await getCaller(req, admin);
     const isLookup = action === 'lookup_by_matric';
     const isSuper = caller.isService || caller.roles.includes('super_admin');
+    const isInstitutionAdmin = !isSuper && caller.hierarchyRole === 'institution_admin';
     let verifiedStudent: { matric_no: string | null; department_id: string } | null = null;
     if (isLookup) {
       if (!caller.userId) return new Response(JSON.stringify({ ok: false, error: 'Sign in with your student account to view attendance.' }), { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
@@ -206,8 +207,10 @@ Deno.serve(async (req) => {
     }
     if (!isLookup) {
       if (caller.anonymous) return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      const isHierarchyArchiveAction = ['read_all', 'append', 'sync_unsynced', 'export_all'].includes(action);
+      const canAccessHierarchyArchive = isHierarchyArchiveAction && isInstitutionAdmin;
       const needed = action === 'read_all' ? STAFF_ROLES : ADMIN_ROLES;
-      if (!hasAnyRole(caller, needed)) return new Response(JSON.stringify({ error: 'Forbidden' }), { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      if (!hasAnyRole(caller, needed) && !canAccessHierarchyArchive) return new Response(JSON.stringify({ error: 'Forbidden' }), { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
     let institutionId = caller.institutionId;
@@ -264,6 +267,12 @@ Deno.serve(async (req) => {
       : { data: [], error: null };
     if (departmentError) throw departmentError;
     const departmentIds = (departments ?? []).map((department: any) => department.id);
+    if (!isSuper && !isInstitutionAdmin && caller.roles.includes('dept_admin')) {
+      if (!caller.departmentId || !departmentIds.includes(caller.departmentId)) {
+        return new Response(JSON.stringify({ error: 'Your department is not linked to this institution archive.' }), { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      }
+      departmentIds.splice(0, departmentIds.length, caller.departmentId);
+    }
 
     if (isLookup) {
       if (rateLimited(`lookup:${clientIp(req)}`, 30)) return new Response(JSON.stringify({ ok: false, error: 'Too many requests' }), { status: 429, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
@@ -291,13 +300,24 @@ Deno.serve(async (req) => {
 
     if (action === 'read_all') {
       let deptName: string | null = null;
-      if (!isSuper && caller.departmentId) {
+      let allowedDepartmentNames: Set<string> | null = null;
+      if (isInstitutionAdmin) {
+        if (!caller.institutionId) return new Response(JSON.stringify({ error: 'No institution assigned.' }), { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+        const { data: scopedFaculties, error: scopedFacultyError } = await admin.from('faculties').select('id').eq('institution_id', caller.institutionId);
+        if (scopedFacultyError) throw scopedFacultyError;
+        const facultyIds = (scopedFaculties ?? []).map((faculty: any) => faculty.id);
+        const { data: scopedDepartments, error: scopedDepartmentError } = facultyIds.length
+          ? await admin.from('departments').select('name').in('faculty_id', facultyIds)
+          : { data: [], error: null };
+        if (scopedDepartmentError) throw scopedDepartmentError;
+        allowedDepartmentNames = new Set((scopedDepartments ?? []).map((department: any) => department.name));
+      } else if (!isSuper && caller.departmentId) {
         const { data: dept } = await admin.from('departments').select('name').eq('id', caller.departmentId).maybeSingle();
         deptName = dept?.name ?? null;
       }
       const all = await readAttendanceRows(token, sid);
       const rows = all
-        .filter(r => isSuper || (deptName && (r[4] ?? '') === deptName))
+        .filter(r => isSuper || (deptName && (r[4] ?? '') === deptName) || (allowedDepartmentNames?.has(r[4] ?? '') ?? false))
         .map(r => ({
           attendance_id: r[0], student_name: r[1], matric_no: r[2], gender: r[3], department: r[4],
           course_code: r[5], course_name: r[6], date: r[7], status: r[8], synced_at: r[9],

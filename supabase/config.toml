@@ -9,6 +9,9 @@ verify_jwt = true
 [functions.session-token]
 verify_jwt = true
 
+[functions.invite-hierarchy-admin]
+verify_jwt = false
+
 # These functions validate the caller themselves (see _shared/auth.ts), so the platform JWT gate is
 # disabled to keep them working with both legacy (JWT) and new (sb_publishable_) API keys.
 # get-student-progress / sheets-sync allow ONLY a rate-limited exact-matric lookup anonymously.

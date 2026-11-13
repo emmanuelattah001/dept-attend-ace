@@ -11,6 +11,8 @@ export type Caller = {
   roles: string[];
   departmentId: string | null;
   institutionId: string | null;
+  hierarchyRole: string | null;
+  facultyId: string | null;
 };
 
 export const STAFF_ROLES = ['dept_admin', 'super_admin', 'hod', 'lecturer', 'course_rep'];
@@ -28,7 +30,7 @@ export function makeAdminClient() {
 }
 
 export async function getCaller(req: Request, admin: ReturnType<typeof makeAdminClient>): Promise<Caller> {
-  const anonymous: Caller = { isService: false, anonymous: true, userId: null, roles: [], departmentId: null, institutionId: null };
+  const anonymous: Caller = { isService: false, anonymous: true, userId: null, roles: [], departmentId: null, institutionId: null, hierarchyRole: null, facultyId: null };
   const header = req.headers.get('Authorization') ?? '';
   if (!header.startsWith('Bearer ')) return anonymous;
   const jwt = header.slice(7).trim();
@@ -36,7 +38,7 @@ export async function getCaller(req: Request, admin: ReturnType<typeof makeAdmin
 
   const service = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
   if (service && safeEqual(jwt, service)) {
-    return { isService: true, anonymous: false, userId: null, roles: ['service_role'], departmentId: null, institutionId: null };
+    return { isService: true, anonymous: false, userId: null, roles: ['service_role'], departmentId: null, institutionId: null, hierarchyRole: null, facultyId: null };
   }
 
   const { data, error } = await admin.auth.getUser(jwt);
@@ -46,7 +48,7 @@ export async function getCaller(req: Request, admin: ReturnType<typeof makeAdmin
   const [{ data: roleRows }, { data: prof }, { data: membership }] = await Promise.all([
     admin.from('user_roles').select('role').eq('user_id', userId),
     admin.from('profiles').select('department_id').eq('user_id', userId).maybeSingle(),
-    admin.from('hierarchy_memberships').select('institution_id').eq('user_id', userId).maybeSingle(),
+    admin.from('hierarchy_memberships').select('institution_id, role, faculty_id').eq('user_id', userId).maybeSingle(),
   ]);
   let institutionId: string | null = membership?.institution_id ?? null;
   if (prof?.department_id) {
@@ -63,6 +65,8 @@ export async function getCaller(req: Request, admin: ReturnType<typeof makeAdmin
     roles: (roleRows ?? []).map((r: any) => r.role as string),
     departmentId: (prof?.department_id as string | null) ?? null,
     institutionId,
+    hierarchyRole: (membership?.role as string | null) ?? null,
+    facultyId: (membership?.faculty_id as string | null) ?? null,
   };
 }
 
